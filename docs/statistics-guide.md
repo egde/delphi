@@ -251,7 +251,40 @@ Delphi looks for the time column in this priority order:
 3. **Columns named** `timestamp`, `created_at`, `event_time`, `date`, or `event_date` with matching type
 4. **The sole date/timestamp column** if there's exactly one
 
-If multiple candidates tie, Delphi skips stratified sampling and warns you. You can specify the time column explicitly in `delphi.toml`:
+If multiple candidates tie at the same priority level, Delphi skips stratified sampling and logs a warning. This is common with tables that have columns like `created_at`, `updated_at`, and `event_date` all present.
+
+### Setting the time column explicitly
+
+When auto-detection is ambiguous (or you want a specific column), set it explicitly. This is the recommended approach for tables with multiple date/timestamp columns:
+
+**Per-test:**
+```python
+@datatest("catalog.schema.events", time_column="event_date")
+def test_events(dt):
+    ...
+```
+
+**In delphi.toml (applies to all tests):**
+```toml
+[delphi]
+time_column = "event_date"
+```
+
+**In YAML:**
+```yaml
+table: catalog.schema.events
+time_column: event_date
+checks:
+  - column: status
+    null_rate: "< 0.01"
+```
+
+**CLI (per-run):**
+```bash
+delphi run tests/ --time-column event_date
+```
+
+You can also customize the list of well-known time column names used by auto-detection:
 
 ```toml
 [delphi]

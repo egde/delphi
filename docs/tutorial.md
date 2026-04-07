@@ -165,6 +165,18 @@ col("x").uniqueness > 0.99           # above threshold
 col("x").mean.between(100, 500)      # within range
 ```
 
+### Time column for sampling
+
+Delphi auto-detects the time column for stratified sampling. If your table has multiple date/timestamp columns and detection is ambiguous, set it explicitly:
+
+```python
+@datatest("catalog.schema.events", time_column="event_date")
+def test_events(dt):
+    dt.expect(col("status").null_rate < 0.01)
+```
+
+You can also set it globally in `delphi.toml` (`time_column = "event_date"`), per-run via CLI (`--time-column event_date`), or in YAML (`time_column: event_date`).
+
 ## Part 4: YAML Checks
 
 For analysts or config-driven pipelines, write checks in YAML:
@@ -172,6 +184,7 @@ For analysts or config-driven pipelines, write checks in YAML:
 ```yaml
 # checks/orders.yaml
 table: catalog.schema.orders
+time_column: order_date  # optional: set when multiple date columns exist
 checks:
   - column: revenue
     null_rate: "< 0.01"

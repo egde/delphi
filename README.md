@@ -117,6 +117,28 @@ dt.expect(col("revenue").mean.between(100, 500), confidence=0.99)  # 99%
 
 A test passes only when the **entire** confidence interval satisfies the threshold. This is conservative -- if the CI straddles the threshold, the test fails.
 
+### Time Column for Sampling
+
+Delphi auto-detects the time column for stratified sampling (partition keys > clustering keys > well-known names like `date`, `timestamp`, `created_at`). When your table has multiple date/timestamp columns and auto-detection is ambiguous, set it explicitly:
+
+**Per-test (decorator):**
+```python
+@datatest("catalog.schema.events", time_column="event_date")
+def test_events(dt):
+    dt.expect(col("status").null_rate < 0.01)
+```
+
+**In delphi.toml (global):**
+```toml
+[delphi]
+time_column = "event_date"
+```
+
+**CLI (per-run):**
+```bash
+delphi run tests/ --time-column event_date
+```
+
 ### YAML Checks
 
 For analysts who prefer configuration over code:
@@ -124,6 +146,7 @@ For analysts who prefer configuration over code:
 ```yaml
 # checks/revenue.yaml
 table: catalog.schema.revenue
+time_column: event_date  # optional: explicit time column for sampling
 checks:
   - column: revenue
     null_rate: "< 0.01"
@@ -178,6 +201,7 @@ delphi run tests/ --confidence 0.99   # Override confidence
 delphi run tests/ --sample-ceiling 200000
 delphi run tests/ --evidence-rows 20  # More evidence rows
 delphi run tests/ --no-evidence       # Suppress evidence
+delphi run tests/ --time-column event_date  # Explicit time column
 
 delphi inspect catalog.schema.table   # Table profile (no sampling)
 
@@ -197,6 +221,7 @@ evidence_rows = 10
 redact_columns = ["ssn", "email"]
 connection_retries = 3
 connection_timeout = 300
+time_column = "event_date"  # optional: explicit time column for sampling
 
 # Serverless (recommended)
 [delphi.connection]
