@@ -6,8 +6,8 @@ import json
 import xml.etree.ElementTree as ET
 
 
-def render_json(results: list[dict]) -> str:
-    """Render results as JSON array."""
+def render_json(results: list[dict], total_ms: int = 0) -> str:
+    """Render results as JSON report."""
     output = []
     for r in results:
         cr = r.get("confidence_result")
@@ -29,13 +29,20 @@ def render_json(results: list[dict]) -> str:
             "evidence": r.get("evidence", []),
         }
         output.append(entry)
-    return json.dumps(output, indent=2, default=str)
+
+    report = {
+        "total_duration_ms": total_ms,
+        "results": output,
+    }
+    return json.dumps(report, indent=2, default=str)
 
 
-def render_junit_xml(results: list[dict]) -> str:
+def render_junit_xml(results: list[dict], total_ms: int = 0) -> str:
     """Render results as JUnit XML."""
     testsuites = ET.Element("testsuites")
-    testsuite = ET.SubElement(testsuites, "testsuite", name="delphi", tests=str(len(results)))
+    testsuite = ET.SubElement(testsuites, "testsuite",
+        name="delphi", tests=str(len(results)), time=str(total_ms / 1000),
+    )
 
     failures = 0
     errors = 0

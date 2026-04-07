@@ -65,10 +65,13 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
     if time_column is not None:
         config.time_column = time_column
 
+    import time as _time
+
     spark = get_spark_session(config, profile=profile)
 
     target = P(path)
     all_results = []
+    run_start = _time.monotonic()
 
     if target.suffix in (".yaml", ".yml"):
         yaml_str = target.read_text()
@@ -86,16 +89,17 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
     elif target.suffix == ".py":
         _run_python_tests(target, spark, config, all_results)
 
+    total_ms = int((_time.monotonic() - run_start) * 1000)
     renderer = output or detect_renderer()
     result_dicts = [_result_to_dict(r) for r in all_results]
 
     if renderer == "terminal":
-        render_terminal(result_dicts)
+        render_terminal(result_dicts, total_ms=total_ms)
     elif renderer == "json":
-        click.echo(render_json(result_dicts))
+        click.echo(render_json(result_dicts, total_ms=total_ms))
     elif renderer == "ci":
-        click.echo(render_json(result_dicts))
-        junit = render_junit_xml(result_dicts)
+        click.echo(render_json(result_dicts, total_ms=total_ms))
+        junit = render_junit_xml(result_dicts, total_ms=total_ms)
         P("delphi-results.xml").write_text(junit)
         click.echo("JUnit XML written to delphi-results.xml")
 

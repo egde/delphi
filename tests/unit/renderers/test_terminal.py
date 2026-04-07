@@ -41,3 +41,16 @@ def test_render_terminal_error():
         suggestion='Did you mean "revenue"?',
     )])
     assert "ERROR" in output
+
+
+def test_render_terminal_summary_footer():
+    results = [
+        _make_result(status="pass"),
+        _make_result(status="fail", passed=False),
+        _make_result(status="error"),
+    ]
+    output = render_terminal(results, total_ms=4200)
+    assert "1 passed" in output
+    assert "1 failed" in output
+    assert "1 errors" in output
+    assert "4.2s" in output

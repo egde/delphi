@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 
-def render_terminal(results: list[dict], console: Console | None = None) -> str:
+def render_terminal(results: list[dict], console: Console | None = None, total_ms: int = 0) -> str:
     """Render test results as a rich terminal table. Returns rendered string."""
     if console is None:
         console = Console(record=True)
@@ -68,5 +68,22 @@ def render_terminal(results: list[dict], console: Console | None = None) -> str:
                 for row in evidence:
                     ev_table.add_row(*[str(v) for v in row.values()])
                 console.print(ev_table)
+
+    # Summary footer
+    passed = sum(1 for r in results if r.get("status") == "pass")
+    failed = sum(1 for r in results if r.get("status") == "fail")
+    errors = sum(1 for r in results if r.get("status") in ("error", "inconclusive"))
+    total_secs = total_ms / 1000
+
+    parts = []
+    if passed:
+        parts.append(f"[green]{passed} passed[/green]")
+    if failed:
+        parts.append(f"[red]{failed} failed[/red]")
+    if errors:
+        parts.append(f"[red]{errors} errors[/red]")
+
+    summary = ", ".join(parts) + f" in {total_secs:.1f}s"
+    console.print(f"\n{summary}")
 
     return console.export_text()
