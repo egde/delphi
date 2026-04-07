@@ -286,7 +286,7 @@ Connection errors retry up to 3 times with exponential backoff (configurable).
 ## Development
 
 ```bash
-git clone https://github.com/your-org/delphi.git
+git clone https://github.com/egde/delphi.git
 cd delphi
 uv sync
 

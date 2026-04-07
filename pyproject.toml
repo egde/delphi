@@ -1,10 +1,38 @@
 [project]
 name = "dbx-delphi"
 version = "0.1.0"
-description = "Probabilistic data test framework for Databricks"
+description = "Probabilistic data test framework for Databricks — test terabyte-scale Delta Lake tables in seconds using statistical sampling and confidence intervals"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "degert"},
+]
+keywords = [
+    "databricks",
+    "delta-lake",
+    "data-quality",
+    "data-testing",
+    "pyspark",
+    "statistical-testing",
+    "confidence-intervals",
+    "sampling",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "databricks-connect>=15.4",
     "databricks-sdk>=0.20",
@@ -14,6 +42,12 @@ dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/egde/delphi"
+Repository = "https://github.com/egde/delphi"
+Documentation = "https://github.com/egde/delphi/blob/main/docs/tutorial.md"
+Issues = "https://github.com/egde/delphi/issues"
 
 [dependency-groups]
 dev = [
@@ -30,6 +64,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/delphi"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "tests/data/",
+    "tests/S&P500_constituents.ipynb",
+    "tests/sp500_constituents.json",
+    "tests/integration_notebook.py",
+    "tests/integration_delphi_dsl.py",
+    ".claude/",
+    "delphi.toml",
+    "dist/",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
