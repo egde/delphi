@@ -73,3 +73,53 @@ def test_missing_profile_raises(tmp_path):
     cfg = load_config(config_path=toml_file)
     with pytest.raises(KeyError, match="staging"):
         cfg.get_profile("staging")
+
+
+def test_load_serverless_connection(tmp_path):
+    """Config loads serverless connection settings."""
+    toml_file = tmp_path / "delphi.toml"
+    toml_file.write_text(
+        "[delphi.connection]\n"
+        'host = "https://example.cloud.databricks.com"\n'
+        "serverless = true\n"
+        'auth_type = "pat"\n'
+    )
+    cfg = load_config(config_path=toml_file)
+    assert cfg.connection.host == "https://example.cloud.databricks.com"
+    assert cfg.connection.serverless is True
+    assert cfg.connection.cluster_id == ""
+
+
+def test_load_cluster_connection_not_serverless(tmp_path):
+    """Non-serverless config defaults serverless to False."""
+    toml_file = tmp_path / "delphi.toml"
+    toml_file.write_text(
+        "[delphi.connection]\n"
+        'host = "https://example.cloud.databricks.com"\n'
+        'cluster_id = "abc-123"\n'
+        'auth_type = "pat"\n'
+    )
+    cfg = load_config(config_path=toml_file)
+    assert cfg.connection.serverless is False
+    assert cfg.connection.cluster_id == "abc-123"
+
+
+def test_serverless_named_profile(tmp_path):
+    """Named profile can be serverless."""
+    toml_file = tmp_path / "delphi.toml"
+    toml_file.write_text(
+        "[delphi.connection]\n"
+        'host = "https://prod.com"\n'
+        'cluster_id = "prod-cluster"\n'
+        'auth_type = "env"\n'
+        "\n"
+        "[delphi.connection.profiles.serverless]\n"
+        'host = "https://prod.com"\n'
+        "serverless = true\n"
+        'auth_type = "env"\n'
+    )
+    cfg = load_config(config_path=toml_file)
+    assert cfg.connection.serverless is False
+    sl = cfg.get_profile("serverless")
+    assert sl.serverless is True
+    assert sl.cluster_id == ""

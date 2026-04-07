@@ -11,6 +11,7 @@ from pathlib import Path
 class ConnectionConfig:
     host: str = ""
     cluster_id: str = ""
+    serverless: bool = False
     auth_type: str = "env"
     token: str = ""
     default_catalog: str = ""
@@ -67,23 +68,22 @@ def load_config(config_path: Path | None = None) -> DelphiConfig:
     )
 
     if conn_raw:
-        cfg.connection = ConnectionConfig(
-            host=conn_raw.get("host", ""),
-            cluster_id=conn_raw.get("cluster_id", ""),
-            auth_type=conn_raw.get("auth_type", "env"),
-            token=conn_raw.get("token", ""),
-            default_catalog=conn_raw.get("default_catalog", ""),
-            default_schema=conn_raw.get("default_schema", ""),
-        )
+        cfg.connection = _parse_connection(conn_raw)
 
     for name, profile_raw in profiles_raw.items():
-        cfg._profiles[name] = ConnectionConfig(
-            host=profile_raw.get("host", ""),
-            cluster_id=profile_raw.get("cluster_id", ""),
-            auth_type=profile_raw.get("auth_type", "env"),
-            token=profile_raw.get("token", ""),
-            default_catalog=profile_raw.get("default_catalog", ""),
-            default_schema=profile_raw.get("default_schema", ""),
-        )
+        cfg._profiles[name] = _parse_connection(profile_raw)
+
 
     return cfg
+
+
+def _parse_connection(raw: dict) -> ConnectionConfig:
+    return ConnectionConfig(
+        host=raw.get("host", ""),
+        cluster_id=raw.get("cluster_id", ""),
+        serverless=raw.get("serverless", False),
+        auth_type=raw.get("auth_type", "env"),
+        token=raw.get("token", ""),
+        default_catalog=raw.get("default_catalog", ""),
+        default_schema=raw.get("default_schema", ""),
+    )
