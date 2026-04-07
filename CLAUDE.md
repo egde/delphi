@@ -62,6 +62,8 @@ src/delphi/
 - **Conservative pass/fail**: entire CI must satisfy threshold, not just the point estimate
 - **Adaptive sampling**: sample size computed from confidence level and margin of error, clamped by floor/ceiling
 - **Views handled**: prescan detects table type via DESCRIBE TABLE EXTENDED, skips DESCRIBE DETAIL for views
+- **Serverless support**: `ConnectionConfig.serverless=True` uses `DatabricksSession.builder.remote(serverless=True)`, mutually exclusive with cluster_id
+- **Version mismatch handling**: `_handle_connect_error()` in session.py catches common databricks-connect errors and logs actionable fix instructions
 - **numpy bool comparison**: use `== True` / `== False` in tests, not `is True` (scipy/numpy return `np.bool_`)
 
 ## Development
@@ -101,9 +103,9 @@ uv build                             # Build wheel
 
 ## Current Version
 
-v0.2.0 — adds view/materialized view support.
+v0.3.0 — adds serverless compute support, DBR version mismatch error guidance, Databricks Connect compatibility guide.
 
-## Deferred to v0.3.0+
+## Deferred to v0.4.0+
 
 - Comparison metric execution (mean_diff, distribution_shift, KS statistic)
 - Notebook renderer (plotly inline charts)
