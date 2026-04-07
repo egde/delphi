@@ -52,6 +52,9 @@ def run_expectations(
         )
         sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
         raw_metrics = compute_metrics(sampled_df, expectations)
+        # row_count should use the full table count, not the sampled count
+        if "row_count" in raw_metrics:
+            raw_metrics["row_count"]["count"] = prescan.row_count
     except Exception as e:
         for exp in expectations:
             results.append(TestResult(
