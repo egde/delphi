@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from delphi.config import ConnectionConfig, DelphiConfig
+
+logger = logging.getLogger(__name__)
+
+NON_RETRYABLE = (PermissionError, KeyError, ValueError)
 
 
 def resolve_connection_config(
@@ -36,3 +43,22 @@ def get_spark_session(
         builder = builder.token(conn.token)
 
     return builder.getOrCreate()
+
+
+def get_spark_session_with_retry(
+    config: DelphiConfig,
+    profile: str | None = None,
+) -> object:
+    """Get Spark session with retry on transient connection errors."""
+    retries = config.connection_retries
+    for attempt in range(1, retries + 1):
+        try:
+            return get_spark_session(config, profile)
+        except NON_RETRYABLE:
+            raise
+        except Exception as e:
+            if attempt == retries:
+                raise
+            delay = 2 ** attempt
+            logger.warning("Connection attempt %d/%d failed: %s. Retrying in %ds...", attempt, retries, e, delay)
+            time.sleep(delay)
