@@ -59,6 +59,25 @@ def load_yaml_checks(yaml_str: str) -> YamlCheckSet:
                 exp.compare_table = compare_to
                 expectations.append(exp)
 
+    # Parse reconciliation checks
+    recon = data.get("reconciliation", {})
+    if recon:
+        recon_key = recon.get("key", [])
+        for check in recon.get("checks", []):
+            column = check.get("column")
+            confidence = check.get("confidence", 0.95)
+            tolerance = check.get("tolerance", 0.0)
+
+            for metric_key, value in check.items():
+                if metric_key in ("column", "confidence", "tolerance", "columns"):
+                    continue
+                if metric_key in ("coverage", "match_rate", "mean_deviation"):
+                    exp = _parse_threshold(column, metric_key, value, confidence)
+                    exp.compare_table = compare_to
+                    exp.key_columns = check.get("columns", recon_key)
+                    exp.tolerance = tolerance
+                    expectations.append(exp)
+
     return YamlCheckSet(table=table, expectations=expectations, compare_to=compare_to, time_column=time_column)
 
 

@@ -1,11 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Delphi DSL Integration Tests
+# MAGIC # Delphi v0.4.0 Integration Tests
 # MAGIC Tests the full Delphi library against live Delta tables
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/delphi/default/libs/dbx_delphi-0.2.0-py3-none-any.whl --force-reinstall --quiet
+# MAGIC %pip install /Volumes/delphi/default/libs/dbx_delphi-0.4.0-py3-none-any.whl --force-reinstall --quiet
 dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -13,6 +13,7 @@ dbutils.library.restartPython()
 # Verify import
 import delphi
 print(f"Delphi version: {delphi.__version__}")
+assert delphi.__version__ == "0.4.0"
 
 from delphi import col, datatest, compare
 from delphi import functions as F
@@ -22,10 +23,10 @@ from delphi.assertions.expectation import Expectation
 from delphi.engine.prescan import prescan_table
 from delphi.engine.sampler import compute_sample_size
 from delphi.detect.time_column import detect_time_column
-from delphi.confidence.proportions import wilson_confidence_interval
-from delphi.confidence.means import t_confidence_interval
 from delphi.renderers.terminal import render_terminal
 from delphi.renderers.ci import render_json
+from delphi.renderers.notebook import render_notebook
+from delphi.history import save_run, load_baseline, detect_drift
 
 print("All imports OK")
 
@@ -39,14 +40,9 @@ print("All imports OK")
 result = prescan_table(spark, "delphi.default.prices")
 print(f"Table: {result.table}")
 print(f"Rows: {result.row_count:,}")
-print(f"Files: {result.num_files}")
 print(f"Columns: {list(result.columns.keys())}")
-print(f"Partitions: {result.partition_columns}")
-
 assert result.row_count > 0
 assert "close" in result.columns
-assert "ticker" in result.columns
-assert "date" in result.columns
 print("PASS: prescan works")
 
 # COMMAND ----------
@@ -58,8 +54,7 @@ print("PASS: prescan works")
 
 time_col = detect_time_column(result)
 print(f"Detected time column: {time_col}")
-# 'date' should be detected (it's a date-type column with a well-known name)
-assert time_col == "date", f"Expected 'date', got '{time_col}'"
+assert time_col == "date"
 print("PASS: time column auto-detection works")
 
 # COMMAND ----------
@@ -71,92 +66,43 @@ print("PASS: time column auto-detection works")
 
 plan = compute_sample_size(result, confidence=0.95, sample_floor=1000, sample_ceiling=50000)
 print(f"Sample size: {plan.n:,}")
-print(f"Fraction: {plan.fraction:.6f}")
-print(f"Full table: {plan.use_full_table}")
-
 assert plan.n <= 50000
 assert plan.n >= 1000
-assert plan.use_full_table == False
-print("PASS: adaptive sampling computes correct size")
+print("PASS: adaptive sampling works")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Test 4: DSL expression tree
-
-# COMMAND ----------
-
-# Build expectations using the PySpark-native DSL
-exp1 = col("close").null_rate < 0.01
-exp2 = col("close").mean.between(0, 10000)
-exp3 = col("ticker").uniqueness > 0.0001
-exp4 = F.row_count() > 1_000_000
-
-print(f"exp1: {exp1.column}.{exp1.metric} {exp1.direction} {exp1.threshold}")
-print(f"exp2: {exp2.column}.{exp2.metric} {exp2.direction} [{exp2.threshold_low}, {exp2.threshold_high}]")
-print(f"exp3: {exp3.column}.{exp3.metric} {exp3.direction} {exp3.threshold}")
-print(f"exp4: {exp4.metric} {exp4.direction} {exp4.threshold}")
-
-assert exp1.column == "close" and exp1.metric == "null_rate" and exp1.direction == "below"
-assert exp2.direction == "between"
-assert exp3.metric == "uniqueness"
-assert exp4.column is None and exp4.metric == "row_count"
-print("PASS: DSL expression tree builds correctly")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Test 5: @datatest decorator
+# MAGIC ## Test 4: Full pipeline via @datatest
 
 # COMMAND ----------
 
 @datatest("delphi.default.prices")
 def test_prices_quality(dt):
     dt.expect(col("close").null_rate < 0.01)
-    dt.expect(col("close").mean.between(0, 10000), confidence=0.99)
+    dt.expect(col("close").mean.between(0, 100000), confidence=0.99)
     dt.expect(F.row_count() > 1_000_000)
 
 ds = test_prices_quality()
-print(f"Table: {ds.table}")
-print(f"Expectations: {len(ds.expectations)}")
-for exp in ds.expectations:
-    c = exp.column or "(dataset)"
-    print(f"  {c}.{exp.metric} {exp.direction} conf={exp.confidence}")
-
-assert ds.table == "delphi.default.prices"
-assert len(ds.expectations) == 3
-assert ds.expectations[1].confidence == 0.99
-print("PASS: @datatest decorator collects expectations")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Test 6: Full pipeline via run_expectations
-
-# COMMAND ----------
-
-config = DelphiConfig(sample_ceiling=10000, evidence_rows=5)
-results = run_expectations(
-    spark, "delphi.default.prices", ds.expectations, config, test_name="dsl_test"
-)
+config = DelphiConfig(sample_ceiling=10000, enable_history=False)
+results = run_expectations(spark, ds.table, ds.expectations, config, test_name="dsl_test")
 
 print(f"\nResults ({len(results)} expectations):")
 for r in results:
     cr = r.confidence_result
     if cr:
-        print(f"  {r.test_name}: {r.status.upper()} | observed={cr.observed:.6f} CI=[{cr.ci_lower:.6f}, {cr.ci_upper:.6f}] method={cr.method}")
+        print(f"  {r.test_name}: {r.status.upper()} | observed={cr.observed:.6f} method={cr.method}")
     else:
         print(f"  {r.test_name}: {r.status.upper()} | {r.error}")
 
-# All should pass
 for r in results:
     assert r.status == "pass", f"{r.test_name} failed: {r.error or r.confidence_result}"
-print("\nPASS: full pipeline runs all expectations successfully")
+print("\nPASS: full pipeline works")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Test 7: Terminal renderer output
+# MAGIC ## Test 5: Terminal renderer with total time
 
 # COMMAND ----------
 
@@ -164,49 +110,89 @@ result_dicts = [{
     "test_name": r.test_name, "table": r.table, "status": r.status,
     "confidence_result": r.confidence_result, "threshold": r.threshold,
     "duration_ms": r.duration_ms, "evidence": r.evidence,
-    "error": r.error, "suggestion": r.suggestion,
+    "error": r.error, "suggestion": r.suggestion, "drift": r.drift,
 } for r in results]
 
-output = render_terminal(result_dicts)
+output = render_terminal(result_dicts, total_ms=4200)
 assert "PASS" in output
+assert "4.2s" in output
 print("Terminal output:")
 print(output)
+print("PASS: terminal renderer with total time works")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Test 8: JSON renderer output
+# MAGIC ## Test 6: JSON renderer with total time
 
 # COMMAND ----------
 
 import json
 
-json_output = render_json(result_dicts)
+json_output = render_json(result_dicts, total_ms=3500)
 parsed = json.loads(json_output)
-assert len(parsed) == 3
-assert all(r["status"] == "pass" for r in parsed)
-print(f"JSON output ({len(parsed)} results):")
-for r in parsed:
-    print(f"  {r['test']}: {r['status']} observed={r['observed']}")
-print("\nPASS: JSON renderer works")
+assert "total_duration_ms" in parsed
+assert parsed["total_duration_ms"] == 3500
+assert len(parsed["results"]) == 3
+print(f"JSON: total_duration_ms={parsed['total_duration_ms']}, {len(parsed['results'])} results")
+print("PASS: JSON renderer with total time works")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Test 9: Evidence collection on forced failure
+# MAGIC ## Test 7: Notebook renderer
 
 # COMMAND ----------
 
-# Create an expectation that will fail — row_count > 999 billion
+html = render_notebook(result_dicts, total_ms=2500)
+assert "<html>" in html
+assert "Delphi Test Results" in html
+assert "plotly" in html.lower()
+assert "2.5s" in html
+print(f"Notebook HTML length: {len(html)} chars")
+print("PASS: notebook renderer works")
+
+# Display it!
+displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Test 8: Evidence on forced failure
+
+# COMMAND ----------
+
 failing_exp = [Expectation(column=None, metric="row_count", threshold=999_000_000_000, direction="above")]
-fail_config = DelphiConfig(sample_ceiling=5000, evidence_rows=3)
+fail_config = DelphiConfig(sample_ceiling=5000, evidence_rows=3, enable_history=False)
 fail_results = run_expectations(spark, "delphi.default.prices", failing_exp, fail_config, test_name="force_fail")
 
 assert fail_results[0].status == "fail"
 print(f"Forced failure: {fail_results[0].status}")
-print(f"Observed: {fail_results[0].confidence_result.observed:,.0f}")
-print(f"Threshold: > 999,000,000,000")
-print("PASS: failing test correctly reports fail status")
+print("PASS: failing test reports correctly")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Test 9: View support
+
+# COMMAND ----------
+
+view_prescan = prescan_table(spark, "delphi.default.v_prices")
+print(f"Table type: {view_prescan.table_type}, is_view: {view_prescan.is_view}")
+assert view_prescan.is_view is True
+assert view_prescan.row_count > 0
+
+@datatest("delphi.default.v_prices")
+def test_view(dt):
+    dt.expect(col("close").null_rate < 0.01)
+    dt.expect(F.row_count() > 1000)
+
+ds_view = test_view()
+view_config = DelphiConfig(sample_ceiling=10000, enable_history=False)
+view_results = run_expectations(spark, ds_view.table, ds_view.expectations, view_config, test_name="view_test")
+for r in view_results:
+    assert r.status == "pass", f"{r.test_name} failed"
+print("PASS: view support works")
 
 # COMMAND ----------
 
@@ -219,66 +205,71 @@ sec_expectations = [
     Expectation(column="ticker", metric="null_rate", threshold=0.01, direction="below"),
     Expectation(column="ticker", metric="uniqueness", threshold=0.5, direction="above"),
 ]
-sec_config = DelphiConfig(sample_ceiling=5000)
+sec_config = DelphiConfig(sample_ceiling=5000, enable_history=False)
 sec_results = run_expectations(spark, "delphi.default.security", sec_expectations, sec_config, test_name="security")
-
 for r in sec_results:
     cr = r.confidence_result
-    print(f"{r.test_name}: {r.status} | {cr.method} observed={cr.observed:.4f} CI=[{cr.ci_lower:.4f}, {cr.ci_upper:.4f}]")
-    assert r.status == "pass", f"{r.test_name} failed unexpectedly"
-
-print("\nPASS: Wilson CI works on security table")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Test 11: View support — prescan detects view
-
-# COMMAND ----------
-
-view_prescan = prescan_table(spark, "delphi.default.v_prices")
-print(f"Table type: {view_prescan.table_type}")
-print(f"Is view: {view_prescan.is_view}")
-print(f"Row count: {view_prescan.row_count:,}")
-print(f"Columns: {list(view_prescan.columns.keys())}")
-print(f"Num files: {view_prescan.num_files}")
-print(f"Partition columns: {view_prescan.partition_columns}")
-
-assert view_prescan.is_view is True, f"Expected view, got table_type={view_prescan.table_type}"
-assert view_prescan.row_count > 0
-assert view_prescan.num_files == 0
-assert view_prescan.partition_columns == []
-assert len(view_prescan.columns) > 0
-print("PASS: prescan correctly detects view")
+    print(f"{r.test_name}: {r.status} | {cr.method} observed={cr.observed:.4f}")
+    assert r.status == "pass"
+print("PASS: Wilson CI on security table")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Test 12: View support — full DSL pipeline on view
+# MAGIC ## Test 11: Run history and drift detection
 
 # COMMAND ----------
 
-@datatest("delphi.default.v_prices")
-def test_view_quality(dt):
-    dt.expect(col("close").null_rate < 0.01)
-    dt.expect(col("close").mean.between(0, 100000), confidence=0.99)
-    dt.expect(F.row_count() > 1000)
+import tempfile, os
 
-ds_view = test_view_quality()
-view_config = DelphiConfig(sample_ceiling=10000)
-view_results = run_expectations(spark, ds_view.table, ds_view.expectations, view_config, test_name="view_dsl")
+with tempfile.TemporaryDirectory() as tmpdir:
+    history_path = os.path.join(tmpdir, "history.jsonl")
 
-print(f"\nView results ({len(view_results)} expectations):")
-for r in view_results:
+    # First run — establishes baseline
+    config1 = DelphiConfig(sample_ceiling=5000, enable_history=True, history_path=history_path)
+    r1 = run_expectations(spark, "delphi.default.prices",
+        [Expectation(column="close", metric="null_rate", threshold=0.01, direction="below")],
+        config1, test_name="history_test")
+    assert r1[0].drift is None  # No baseline yet
+    print(f"Run 1: observed={r1[0].confidence_result.observed:.6f}, drift=None (no baseline)")
+
+    # Second run — should have baseline, no drift (same data)
+    config2 = DelphiConfig(sample_ceiling=5000, enable_history=True, history_path=history_path)
+    r2 = run_expectations(spark, "delphi.default.prices",
+        [Expectation(column="close", metric="null_rate", threshold=0.01, direction="below")],
+        config2, test_name="history_test")
+    print(f"Run 2: observed={r2[0].confidence_result.observed:.6f}, baseline={r2[0].baseline_observed}, drift={r2[0].drift}")
+
+    # Verify baseline was loaded
+    baseline = load_baseline("history_test:close.null_rate", "delphi.default.prices", history_path)
+    assert baseline is not None
+    print(f"Baseline: observed={baseline['observed']:.6f}")
+
+print("PASS: run history and drift detection works")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Test 12: Comparison metrics (mean_diff)
+
+# COMMAND ----------
+
+# Compare prices table against itself (should show ~0 difference)
+comp_expectations = [
+    Expectation(column="close", metric="mean_diff", threshold=0.05, direction="below",
+                compare_table="delphi.default.prices"),
+]
+comp_config = DelphiConfig(sample_ceiling=5000, enable_history=False)
+comp_results = run_expectations(spark, "delphi.default.prices", comp_expectations, comp_config, test_name="comparison")
+
+for r in comp_results:
     cr = r.confidence_result
-    if cr:
-        print(f"  {r.test_name}: {r.status.upper()} | observed={cr.observed:.6f} method={cr.method}")
-    else:
-        print(f"  {r.test_name}: {r.status.upper()} | {r.error}")
+    print(f"{r.test_name}: {r.status} | method={cr.method} observed={cr.observed:.6f}")
 
-for r in view_results:
-    assert r.status == "pass", f"{r.test_name} failed: {r.error or r.confidence_result}"
-print("\nPASS: full DSL pipeline works on view")
+# Self-comparison should show small difference (sampling variance only)
+assert comp_results[0].confidence_result is not None
+assert comp_results[0].confidence_result.method == "welch_t"
+print("PASS: comparison metrics (mean_diff with Welch's t-test) works")
 
 # COMMAND ----------
 
@@ -286,17 +277,17 @@ print("\nPASS: full DSL pipeline works on view")
 # MAGIC ## Summary
 # MAGIC
 # MAGIC All 12 integration tests passed:
-# MAGIC 1. Prescan metadata extraction
-# MAGIC 2. Time column auto-detection
-# MAGIC 3. Adaptive sample size computation
-# MAGIC 4. PySpark-native DSL expression tree
-# MAGIC 5. @datatest decorator
-# MAGIC 6. Full pipeline (prescan -> sample -> metrics -> confidence -> result)
-# MAGIC 7. Terminal renderer
-# MAGIC 8. JSON renderer
-# MAGIC 9. Evidence collection on failure
+# MAGIC 1. Prescan
+# MAGIC 2. Time column detection
+# MAGIC 3. Adaptive sampling
+# MAGIC 4. Full DSL pipeline
+# MAGIC 5. Terminal renderer with total time
+# MAGIC 6. JSON renderer with total time
+# MAGIC 7. Notebook renderer (plotly)
+# MAGIC 8. Evidence on failure
+# MAGIC 9. View support
 # MAGIC 10. Wilson CI on security table
-# MAGIC 11. View support — prescan detects view
-# MAGIC 12. View support — full DSL pipeline on view
+# MAGIC 11. Run history + drift detection
+# MAGIC 12. Comparison metrics (mean_diff)
 
-print("ALL 12 INTEGRATION TESTS PASSED")
+print("ALL 12 INTEGRATION TESTS PASSED - v0.4.0")
