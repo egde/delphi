@@ -278,6 +278,11 @@ Every error includes a suggestion:
 
 Connection errors retry up to 3 times with exponential backoff (configurable).
 
+## Documentation
+
+- [Tutorial](docs/tutorial.md) -- Step-by-step guide from setup to CI/CD
+- [Statistics Guide](docs/statistics-guide.md) -- Plain-language explanation of confidence intervals, sampling methods, and every statistical concept used in Delphi
+
 ## Development
 
 ```bash
