@@ -29,6 +29,7 @@ Databricks Connect lets you run PySpark code on your local machine while the act
 host = "https://your-workspace.cloud.databricks.com"
 serverless = true
 auth_type = "env"
+# budget_policy_id = "policy-abc-123"  # optional: usage/budget policy
 ```
 
 ```bash

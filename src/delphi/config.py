@@ -12,6 +12,7 @@ class ConnectionConfig:
     host: str = ""
     cluster_id: str = ""
     serverless: bool = False
+    budget_policy_id: str = ""
     auth_type: str = "env"
     token: str = ""
     default_catalog: str = ""
@@ -84,6 +85,7 @@ def _parse_connection(raw: dict) -> ConnectionConfig:
         host=raw.get("host", ""),
         cluster_id=raw.get("cluster_id", ""),
         serverless=raw.get("serverless", False),
+        budget_policy_id=raw.get("budget_policy_id", ""),
         auth_type=raw.get("auth_type", "env"),
         token=raw.get("token", ""),
         default_catalog=raw.get("default_catalog", ""),

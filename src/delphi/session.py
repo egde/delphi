@@ -45,6 +45,10 @@ def get_spark_session(
                 host=conn.host,
                 serverless=True,
             )
+            if conn.budget_policy_id:
+                builder = builder.serverless(
+                    enabled=True, usage_policy_id=conn.budget_policy_id
+                )
         else:
             builder = DatabricksSession.builder.remote(
                 host=conn.host,

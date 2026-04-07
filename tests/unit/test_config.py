@@ -88,6 +88,22 @@ def test_load_serverless_connection(tmp_path):
     assert cfg.connection.host == "https://example.cloud.databricks.com"
     assert cfg.connection.serverless is True
     assert cfg.connection.cluster_id == ""
+    assert cfg.connection.budget_policy_id == ""
+
+
+def test_load_serverless_with_budget_policy(tmp_path):
+    """Config loads budget_policy_id for serverless."""
+    toml_file = tmp_path / "delphi.toml"
+    toml_file.write_text(
+        "[delphi.connection]\n"
+        'host = "https://example.cloud.databricks.com"\n'
+        "serverless = true\n"
+        'budget_policy_id = "policy-abc-123"\n'
+        'auth_type = "env"\n'
+    )
+    cfg = load_config(config_path=toml_file)
+    assert cfg.connection.serverless is True
+    assert cfg.connection.budget_policy_id == "policy-abc-123"
 
 
 def test_load_cluster_connection_not_serverless(tmp_path):
