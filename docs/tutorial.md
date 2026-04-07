@@ -26,7 +26,7 @@ delphi setup
 
 You'll be prompted for:
 1. Your workspace URL (e.g., `https://your-workspace.cloud.databricks.com`)
-2. Your cluster ID (find it under Compute in the Databricks UI)
+2. Compute type -- **serverless** (recommended, no cluster needed) or **classic cluster** (requires cluster ID)
 3. Authentication method (token, OAuth, or environment variables)
 4. Default catalog and schema (optional)
 
@@ -39,8 +39,9 @@ If you prefer not to use `delphi.toml` (common in CI/CD):
 ```bash
 export DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
 export DATABRICKS_TOKEN=dapi_your_token
-export DATABRICKS_CLUSTER_ID=0123-456789-abcdef
 ```
+
+**Important:** If you're using a classic cluster, your `databricks-connect` pip package version must match the Databricks Runtime (DBR) on the cluster. See the [Databricks Connect Guide](databricks-connect-guide.md) for version matching details and troubleshooting.
 
 ### Verify the connection
 
@@ -164,6 +165,18 @@ col("x").uniqueness > 0.99           # above threshold
 col("x").mean.between(100, 500)      # within range
 ```
 
+### Time column for sampling
+
+Delphi auto-detects the time column for stratified sampling. If your table has multiple date/timestamp columns and detection is ambiguous, set it explicitly:
+
+```python
+@datatest("catalog.schema.events", time_column="event_date")
+def test_events(dt):
+    dt.expect(col("status").null_rate < 0.01)
+```
+
+You can also set it globally in `delphi.toml` (`time_column = "event_date"`), per-run via CLI (`--time-column event_date`), or in YAML (`time_column: event_date`).
+
 ## Part 4: YAML Checks
 
 For analysts or config-driven pipelines, write checks in YAML:
@@ -171,6 +184,7 @@ For analysts or config-driven pipelines, write checks in YAML:
 ```yaml
 # checks/orders.yaml
 table: catalog.schema.orders
+time_column: order_date  # optional: set when multiple date columns exist
 checks:
   - column: revenue
     null_rate: "< 0.01"

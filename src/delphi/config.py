@@ -11,6 +11,7 @@ from pathlib import Path
 class ConnectionConfig:
     host: str = ""
     cluster_id: str = ""
+    serverless: bool = False
     auth_type: str = "env"
     token: str = ""
     default_catalog: str = ""
@@ -26,6 +27,7 @@ class DelphiConfig:
     redact_columns: list[str] = field(default_factory=list)
     connection_retries: int = 3
     connection_timeout: int = 300
+    time_column: str = ""
     time_column_names: list[str] = field(
         default_factory=lambda: [
             "timestamp", "created_at", "event_time", "date", "event_date",
@@ -57,6 +59,7 @@ def load_config(config_path: Path | None = None) -> DelphiConfig:
         sample_floor=delphi_section.get("sample_floor", 1000),
         sample_ceiling=delphi_section.get("sample_ceiling", 100000),
         evidence_rows=delphi_section.get("evidence_rows", 10),
+        time_column=delphi_section.get("time_column", ""),
         redact_columns=delphi_section.get("redact_columns", []),
         connection_retries=delphi_section.get("connection_retries", 3),
         connection_timeout=delphi_section.get("connection_timeout", 300),
@@ -67,23 +70,22 @@ def load_config(config_path: Path | None = None) -> DelphiConfig:
     )
 
     if conn_raw:
-        cfg.connection = ConnectionConfig(
-            host=conn_raw.get("host", ""),
-            cluster_id=conn_raw.get("cluster_id", ""),
-            auth_type=conn_raw.get("auth_type", "env"),
-            token=conn_raw.get("token", ""),
-            default_catalog=conn_raw.get("default_catalog", ""),
-            default_schema=conn_raw.get("default_schema", ""),
-        )
+        cfg.connection = _parse_connection(conn_raw)
 
     for name, profile_raw in profiles_raw.items():
-        cfg._profiles[name] = ConnectionConfig(
-            host=profile_raw.get("host", ""),
-            cluster_id=profile_raw.get("cluster_id", ""),
-            auth_type=profile_raw.get("auth_type", "env"),
-            token=profile_raw.get("token", ""),
-            default_catalog=profile_raw.get("default_catalog", ""),
-            default_schema=profile_raw.get("default_schema", ""),
-        )
+        cfg._profiles[name] = _parse_connection(profile_raw)
+
 
     return cfg
+
+
+def _parse_connection(raw: dict) -> ConnectionConfig:
+    return ConnectionConfig(
+        host=raw.get("host", ""),
+        cluster_id=raw.get("cluster_id", ""),
+        serverless=raw.get("serverless", False),
+        auth_type=raw.get("auth_type", "env"),
+        token=raw.get("token", ""),
+        default_catalog=raw.get("default_catalog", ""),
+        default_schema=raw.get("default_schema", ""),
+    )

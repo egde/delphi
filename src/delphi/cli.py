@@ -37,8 +37,9 @@ def setup(profile, verify):
 @click.option("--no-evidence", is_flag=True)
 @click.option("--confidence", type=float, default=None)
 @click.option("--sample-ceiling", type=int, default=None)
+@click.option("--time-column", default=None, help="Explicit time column for stratified sampling.")
 @click.option("--profile", default=None, help="Named connection profile.")
-def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, profile):
+def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, time_column, profile):
     """Run data tests from Python files or YAML."""
     import importlib.util
     from pathlib import Path as P
@@ -61,6 +62,8 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, pr
         config.evidence_rows = evidence_rows
     if no_evidence:
         config.evidence_rows = 0
+    if time_column is not None:
+        config.time_column = time_column
 
     spark = get_spark_session(config, profile=profile)
 

@@ -18,8 +18,19 @@ DEFAULT_TIME_NAMES = [
 def detect_time_column(
     prescan: PrescanResult,
     time_column_names: list[str] | None = None,
+    explicit: str | None = None,
 ) -> str | None:
-    """Detect the time column using a priority heuristic."""
+    """Detect the time column using a priority heuristic.
+
+    If explicit is set, validates it exists in the table and returns it.
+    Otherwise, auto-detects using the priority heuristic.
+    """
+    if explicit:
+        if explicit in prescan.columns:
+            return explicit
+        logger.warning("Explicit time column '%s' not found in table %s", explicit, prescan.table)
+        return None
+
     names = time_column_names or DEFAULT_TIME_NAMES
 
     def _is_time_type(col_name: str) -> bool:

@@ -15,6 +15,7 @@ class YamlCheckSet:
     table: str
     expectations: list[Expectation]
     compare_to: str | None = None
+    time_column: str | None = None
 
 
 METRIC_KEYS = {
@@ -30,6 +31,7 @@ def load_yaml_checks(yaml_str: str) -> YamlCheckSet:
 
     table = data["table"]
     compare_to = data.get("compare_to")
+    time_column = data.get("time_column")
     expectations = []
 
     for check in data.get("checks", []):
@@ -57,7 +59,7 @@ def load_yaml_checks(yaml_str: str) -> YamlCheckSet:
                 exp.compare_table = compare_to
                 expectations.append(exp)
 
-    return YamlCheckSet(table=table, expectations=expectations, compare_to=compare_to)
+    return YamlCheckSet(table=table, expectations=expectations, compare_to=compare_to, time_column=time_column)
 
 
 def _parse_threshold(

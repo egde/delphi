@@ -44,7 +44,10 @@ def run_expectations(
 
     try:
         prescan = prescan_table(spark, table)
-        time_col = detect_time_column(prescan, config.time_column_names)
+        time_col = detect_time_column(
+            prescan, config.time_column_names,
+            explicit=config.time_column or None,
+        )
         sample_plan = compute_sample_size(
             prescan, confidence=config.default_confidence,
             sample_floor=config.sample_floor,
