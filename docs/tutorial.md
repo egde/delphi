@@ -26,7 +26,7 @@ delphi setup
 
 You'll be prompted for:
 1. Your workspace URL (e.g., `https://your-workspace.cloud.databricks.com`)
-2. Your cluster ID (find it under Compute in the Databricks UI)
+2. Compute type -- **serverless** (recommended, no cluster needed) or **classic cluster** (requires cluster ID)
 3. Authentication method (token, OAuth, or environment variables)
 4. Default catalog and schema (optional)
 
@@ -39,8 +39,9 @@ If you prefer not to use `delphi.toml` (common in CI/CD):
 ```bash
 export DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
 export DATABRICKS_TOKEN=dapi_your_token
-export DATABRICKS_CLUSTER_ID=0123-456789-abcdef
 ```
+
+**Important:** If you're using a classic cluster, your `databricks-connect` pip package version must match the Databricks Runtime (DBR) on the cluster. See the [Databricks Connect Guide](databricks-connect-guide.md) for version matching details and troubleshooting.
 
 ### Verify the connection
 

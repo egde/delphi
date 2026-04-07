@@ -198,12 +198,19 @@ redact_columns = ["ssn", "email"]
 connection_retries = 3
 connection_timeout = 300
 
+# Serverless (recommended)
 [delphi.connection]
 host = "https://your-workspace.cloud.databricks.com"
-cluster_id = "0123-456789-abcdef"
+serverless = true
 auth_type = "env"
 default_catalog = "main"
 default_schema = "default"
+
+# Classic cluster (alternative)
+# [delphi.connection]
+# host = "https://your-workspace.cloud.databricks.com"
+# cluster_id = "0123-456789-abcdef"
+# auth_type = "env"
 ```
 
 ### Named Profiles
@@ -211,7 +218,7 @@ default_schema = "default"
 ```toml
 [delphi.connection.profiles.staging]
 host = "https://staging.cloud.databricks.com"
-cluster_id = "0123-456789-staging"
+serverless = true
 auth_type = "env"
 ```
 
@@ -282,6 +289,7 @@ Connection errors retry up to 3 times with exponential backoff (configurable).
 
 - [Tutorial](docs/tutorial.md) -- Step-by-step guide from setup to CI/CD
 - [Statistics Guide](docs/statistics-guide.md) -- Plain-language explanation of confidence intervals, sampling methods, and every statistical concept used in Delphi
+- [Databricks Connect Guide](docs/databricks-connect-guide.md) -- Serverless vs cluster, version matching, and troubleshooting
 
 ## Development
 
