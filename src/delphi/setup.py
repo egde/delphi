@@ -19,7 +19,17 @@ def run_setup(profile: str | None = None):
     if not host.startswith("https://"):
         host = f"https://{host}"
 
-    cluster_id = click.prompt("Cluster ID", type=str)
+    console.print("\nCompute type:")
+    console.print("  1. Classic cluster (requires cluster ID)")
+    console.print("  2. Serverless compute (no cluster needed)")
+    compute_choice = click.prompt("Choose", type=click.Choice(["1", "2"]), default="2")
+
+    cluster_id = ""
+    serverless = False
+    if compute_choice == "1":
+        cluster_id = click.prompt("Cluster ID", type=str)
+    else:
+        serverless = True
 
     auth_choices = {"1": ("pat", "Personal Access Token"), "2": ("oauth", "OAuth"), "3": ("env", "Environment variables")}
     console.print("\nAuthentication method:")
@@ -36,12 +46,12 @@ def run_setup(profile: str | None = None):
     schema = click.prompt("Default schema (optional)", default="", show_default=False)
 
     config_path = Path("delphi.toml")
-    _write_config(config_path, host, cluster_id, auth_type, token, catalog, schema, profile)
+    _write_config(config_path, host, cluster_id, serverless, auth_type, token, catalog, schema, profile)
     _ensure_gitignore(config_path)
 
     console.print("\n[bold]Verifying connection...[/bold]")
     try:
-        _verify(host, cluster_id, auth_type, token)
+        _verify(host, cluster_id, serverless, auth_type, token)
         console.print("[green]Connection successful![/green]")
     except Exception as e:
         console.print(f"[red]Connection failed:[/red] {e}")
@@ -56,22 +66,25 @@ def verify_connection(profile: str | None = None):
 
     console.print(f"Verifying connection to [bold]{conn.host}[/bold]...")
     try:
-        _verify(conn.host, conn.cluster_id, conn.auth_type, conn.token)
+        _verify(conn.host, conn.cluster_id, conn.serverless, conn.auth_type, conn.token)
         console.print("[green]Connection successful![/green]")
     except Exception as e:
         console.print(f"[red]Connection failed:[/red] {e}")
 
 
-def _verify(host: str, cluster_id: str, auth_type: str, token: str):
+def _verify(host: str, cluster_id: str, serverless: bool, auth_type: str, token: str):
     from databricks.connect import DatabricksSession
-    builder = DatabricksSession.builder.remote(host=host, cluster_id=cluster_id)
+    if serverless:
+        builder = DatabricksSession.builder.remote(host=host, serverless=True)
+    else:
+        builder = DatabricksSession.builder.remote(host=host, cluster_id=cluster_id)
     if auth_type == "pat" and token:
         builder = builder.token(token)
     spark = builder.getOrCreate()
     spark.sql("SELECT 1").collect()
 
 
-def _write_config(path, host, cluster_id, auth_type, token, catalog, schema, profile):
+def _write_config(path, host, cluster_id, serverless, auth_type, token, catalog, schema, profile):
     existing = {}
     if path.exists():
         with open(path, "rb") as f:
@@ -84,7 +97,12 @@ def _write_config(path, host, cluster_id, auth_type, token, catalog, schema, pro
         conn = delphi.setdefault("connection", {})
 
     conn["host"] = host
-    conn["cluster_id"] = cluster_id
+    if serverless:
+        conn["serverless"] = True
+        conn.pop("cluster_id", None)
+    else:
+        conn["cluster_id"] = cluster_id
+        conn.pop("serverless", None)
     conn["auth_type"] = auth_type
     if auth_type == "pat" and token:
         conn["token"] = token
