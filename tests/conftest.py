@@ -23,3 +23,8 @@ def prices(spark):
 @pytest.fixture(scope="session")
 def security(spark):
     return spark.table("delphi.default.security")
+
+
+@pytest.fixture(scope="session")
+def v_prices(spark):
+    return spark.table("delphi.default.v_prices")

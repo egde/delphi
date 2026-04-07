@@ -25,3 +25,13 @@ def test_security_has_expected_columns(security):
     assert "ticker" in col_names
     assert "name" in col_names
     assert "sector" in col_names
+
+
+def test_view_readable(v_prices):
+    assert v_prices.count() > 0
+
+
+def test_view_has_expected_columns(v_prices):
+    col_names = [f.name for f in v_prices.schema.fields]
+    assert "ticker" in col_names
+    assert "close" in col_names

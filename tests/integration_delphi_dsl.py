@@ -5,7 +5,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/delphi/default/libs/dbx_delphi-0.1.0-py3-none-any.whl --force-reinstall --quiet
+# MAGIC %pip install /Volumes/delphi/default/libs/dbx_delphi-0.2.0-py3-none-any.whl --force-reinstall --quiet
 dbutils.library.restartPython()
 
 # COMMAND ----------
@@ -232,18 +232,71 @@ print("\nPASS: Wilson CI works on security table")
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Test 11: View support — prescan detects view
+
+# COMMAND ----------
+
+view_prescan = prescan_table(spark, "delphi.default.v_prices")
+print(f"Table type: {view_prescan.table_type}")
+print(f"Is view: {view_prescan.is_view}")
+print(f"Row count: {view_prescan.row_count:,}")
+print(f"Columns: {list(view_prescan.columns.keys())}")
+print(f"Num files: {view_prescan.num_files}")
+print(f"Partition columns: {view_prescan.partition_columns}")
+
+assert view_prescan.is_view is True, f"Expected view, got table_type={view_prescan.table_type}"
+assert view_prescan.row_count > 0
+assert view_prescan.num_files == 0
+assert view_prescan.partition_columns == []
+assert len(view_prescan.columns) > 0
+print("PASS: prescan correctly detects view")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Test 12: View support — full DSL pipeline on view
+
+# COMMAND ----------
+
+@datatest("delphi.default.v_prices")
+def test_view_quality(dt):
+    dt.expect(col("close").null_rate < 0.01)
+    dt.expect(col("close").mean.between(0, 100000), confidence=0.99)
+    dt.expect(F.row_count() > 1000)
+
+ds_view = test_view_quality()
+view_config = DelphiConfig(sample_ceiling=10000)
+view_results = run_expectations(spark, ds_view.table, ds_view.expectations, view_config, test_name="view_dsl")
+
+print(f"\nView results ({len(view_results)} expectations):")
+for r in view_results:
+    cr = r.confidence_result
+    if cr:
+        print(f"  {r.test_name}: {r.status.upper()} | observed={cr.observed:.6f} method={cr.method}")
+    else:
+        print(f"  {r.test_name}: {r.status.upper()} | {r.error}")
+
+for r in view_results:
+    assert r.status == "pass", f"{r.test_name} failed: {r.error or r.confidence_result}"
+print("\nPASS: full DSL pipeline works on view")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Summary
 # MAGIC
-# MAGIC All 10 integration tests passed:
+# MAGIC All 12 integration tests passed:
 # MAGIC 1. Prescan metadata extraction
 # MAGIC 2. Time column auto-detection
 # MAGIC 3. Adaptive sample size computation
 # MAGIC 4. PySpark-native DSL expression tree
 # MAGIC 5. @datatest decorator
-# MAGIC 6. Full pipeline (prescan → sample → metrics → confidence → result)
+# MAGIC 6. Full pipeline (prescan -> sample -> metrics -> confidence -> result)
 # MAGIC 7. Terminal renderer
 # MAGIC 8. JSON renderer
 # MAGIC 9. Evidence collection on failure
 # MAGIC 10. Wilson CI on security table
+# MAGIC 11. View support — prescan detects view
+# MAGIC 12. View support — full DSL pipeline on view
 
-print("ALL 10 INTEGRATION TESTS PASSED")
+print("ALL 12 INTEGRATION TESTS PASSED")
