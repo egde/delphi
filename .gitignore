@@ -14,3 +14,6 @@ delphi.toml
 .pytest_cache/
 .coverage
 htmlcov/
+tests/data/
+tests/S&P500_constituents.ipynb
+tests/sp500_constituents.json
