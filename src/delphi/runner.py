@@ -14,6 +14,7 @@ from delphi.config import DelphiConfig
 from delphi.engine.prescan import prescan_table
 from delphi.engine.sampler import compute_sample_size, sample_dataframe
 from delphi.engine.metrics import compute_metrics, compute_comparison_metrics, COMPARISON_METRICS
+from delphi.engine.reconciliation import compute_reconciliation_metrics, RECONCILIATION_METRICS
 from delphi.evidence import collect_evidence
 from delphi.detect.time_column import detect_time_column
 
@@ -57,9 +58,10 @@ def run_expectations(
         )
         sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
 
-        # Split expectations into regular and comparison
-        regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS]
+        # Split expectations into regular, comparison, and reconciliation
+        regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS and e.metric not in RECONCILIATION_METRICS]
         compare_exps = [e for e in expectations if e.metric in COMPARISON_METRICS]
+        recon_exps = [e for e in expectations if e.metric in RECONCILIATION_METRICS]
 
         raw_metrics = compute_metrics(sampled_df, regular_exps)
         # row_count should use the full table count, not the sampled count
@@ -79,6 +81,15 @@ def run_expectations(
                 comp_df = sample_dataframe(spark, comp_table, comp_plan)
                 comp_metrics = compute_comparison_metrics(sampled_df, comp_df, compare_exps)
                 raw_metrics.update(comp_metrics)
+
+        # Handle reconciliation metrics — use full target table (not sampled) for join accuracy
+        if recon_exps:
+            df_full_target = spark.table(table)
+            recon_tables = {e.compare_table for e in recon_exps if e.compare_table}
+            for recon_table in recon_tables:
+                df_expected = spark.table(recon_table)
+                recon_metrics = compute_reconciliation_metrics(df_full_target, df_expected, recon_exps)
+                raw_metrics.update(recon_metrics)
     except Exception as e:
         for exp in expectations:
             results.append(TestResult(
@@ -101,11 +112,15 @@ def run_expectations(
 
             evidence = []
             if status == "fail" and config.evidence_rows > 0:
-                evidence = collect_evidence(
-                    sampled_df, exp,
-                    max_rows=config.evidence_rows,
-                    redact_columns=config.redact_columns,
-                )
+                # Reconciliation metrics have mismatches built in
+                if exp.metric == "match_rate" and "mismatches" in metric_data:
+                    evidence = metric_data["mismatches"][:config.evidence_rows]
+                elif exp.metric not in RECONCILIATION_METRICS:
+                    evidence = collect_evidence(
+                        sampled_df, exp,
+                        max_rows=config.evidence_rows,
+                        redact_columns=config.redact_columns,
+                    )
 
             elapsed_ms = int((time.monotonic() - start) * 1000)
             results.append(TestResult(
@@ -252,6 +267,33 @@ def _compute_confidence(
             ci_upper=1.0 if match else 0.0,
             confidence=1.0, method="exact",
             sample_size=0, passed=bool(match),
+        )
+
+    # Reconciliation metrics
+    if exp.metric == "coverage":
+        rate = metrics.get("rate", 0)
+        total = metrics.get("total", 0)
+        return wilson_confidence_interval(
+            successes=metrics.get("found", 0), n=total,
+            confidence=exp.confidence,
+            threshold=exp.threshold, direction=exp.direction,
+        )
+
+    if exp.metric == "match_rate":
+        total = metrics.get("total", 0)
+        return wilson_confidence_interval(
+            successes=metrics.get("matches", 0), n=total,
+            confidence=exp.confidence,
+            threshold=exp.threshold, direction=exp.direction,
+        )
+
+    if exp.metric == "mean_deviation":
+        return t_confidence_interval(
+            sample_mean=metrics.get("mean_dev", 0),
+            sample_std=metrics.get("std_dev", 0) or 0,
+            n=metrics.get("total", 1),
+            confidence=exp.confidence,
+            threshold=exp.threshold, direction=exp.direction,
         )
 
     raise ValueError(f"Unknown metric: {exp.metric}")

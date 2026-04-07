@@ -16,3 +16,6 @@ class Expectation:
     confidence: float = 0.95
     metric_args: dict = field(default_factory=dict)
     compare_table: str | None = None
+    # Reconciliation fields
+    key_columns: list[str] = field(default_factory=list)
+    tolerance: float = 0.0

@@ -185,6 +185,48 @@ def test_matches_expected(dt):
     dt.expect(F.row_count_ratio(expected).between(0.99, 1.01))
 ```
 
+### Data Reconciliation
+
+Verify that expected data exists in the target and values match. Useful for ETL validation, migration testing, and regression checks:
+
+```python
+@datatest("catalog.schema.target")
+def test_reconciliation(dt):
+    expected = compare("catalog.schema.expected_subset")
+    keys = ["ticker", "date"]
+
+    # Coverage: are all expected rows present?
+    dt.expect(col(*keys).coverage(expected) > 0.99)
+
+    # Exact match: do string columns match perfectly?
+    dt.expect(col("name").match_rate(expected, key=keys) > 0.99)
+
+    # Approximate match: numeric column within 1% tolerance
+    dt.expect(col("close").match_rate(expected, key=keys, tolerance=0.01) > 0.95)
+
+    # Mean deviation: average difference for numeric columns
+    dt.expect(col("close").mean_deviation(expected, key=keys) < 0.005)
+```
+
+**YAML:**
+```yaml
+table: catalog.schema.target
+compare_to: catalog.schema.expected_subset
+reconciliation:
+  key: [ticker, date]
+  checks:
+    - coverage: "> 0.99"
+    - column: name
+      match_rate: "> 0.99"
+    - column: close
+      match_rate: "> 0.95"
+      tolerance: 0.01
+    - column: close
+      mean_deviation: "< 0.005"
+```
+
+On failure, evidence shows the mismatched rows with expected vs actual values and deviation percentage.
+
 ## CLI
 
 ```
