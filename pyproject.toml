@@ -1,0 +1,38 @@
+[project]
+name = "dbx-delphi"
+version = "0.1.0"
+description = "Probabilistic data test framework for Databricks"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "databricks-connect>=15.4",
+    "databricks-sdk>=0.20",
+    "scipy>=1.11",
+    "rich>=13.0",
+    "plotly>=5.0",
+    "click>=8.0",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.0",
+]
+
+[project.scripts]
+delphi = "delphi.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/delphi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires Databricks Connect (deselect with '-m \"not integration\"')",
+]
