@@ -230,6 +230,7 @@ serverless = true
 auth_type = "env"
 default_catalog = "main"
 default_schema = "default"
+# budget_policy_id = "policy-abc-123"  # optional: usage/budget policy for serverless
 
 # Classic cluster (alternative)
 # [delphi.connection]
