@@ -95,6 +95,14 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
 
     if renderer == "terminal":
         render_terminal(result_dicts, total_ms=total_ms)
+    elif renderer == "notebook":
+        from delphi.renderers.notebook import render_notebook
+        html = render_notebook(result_dicts, total_ms=total_ms)
+        try:
+            from dbruntime.display import displayHTML
+            displayHTML(html)
+        except ImportError:
+            click.echo(html)
     elif renderer == "json":
         click.echo(render_json(result_dicts, total_ms=total_ms))
     elif renderer == "ci":
