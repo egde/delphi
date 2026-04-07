@@ -9,11 +9,11 @@ from difflib import get_close_matches
 from delphi.assertions.expectation import Expectation
 from delphi.confidence.result import ConfidenceResult
 from delphi.confidence.proportions import wilson_confidence_interval
-from delphi.confidence.means import t_confidence_interval
+from delphi.confidence.means import t_confidence_interval, welch_t_confidence_interval
 from delphi.config import DelphiConfig
 from delphi.engine.prescan import prescan_table
 from delphi.engine.sampler import compute_sample_size, sample_dataframe
-from delphi.engine.metrics import compute_metrics
+from delphi.engine.metrics import compute_metrics, compute_comparison_metrics, COMPARISON_METRICS
 from delphi.evidence import collect_evidence
 from delphi.detect.time_column import detect_time_column
 
@@ -54,10 +54,29 @@ def run_expectations(
             sample_ceiling=config.sample_ceiling,
         )
         sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
-        raw_metrics = compute_metrics(sampled_df, expectations)
+
+        # Split expectations into regular and comparison
+        regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS]
+        compare_exps = [e for e in expectations if e.metric in COMPARISON_METRICS]
+
+        raw_metrics = compute_metrics(sampled_df, regular_exps)
         # row_count should use the full table count, not the sampled count
         if "row_count" in raw_metrics:
             raw_metrics["row_count"]["count"] = prescan.row_count
+
+        # Handle comparison metrics — sample the comparison table too
+        if compare_exps:
+            compare_tables = {e.compare_table for e in compare_exps if e.compare_table}
+            for comp_table in compare_tables:
+                comp_prescan = prescan_table(spark, comp_table)
+                comp_plan = compute_sample_size(
+                    comp_prescan, confidence=config.default_confidence,
+                    sample_floor=config.sample_floor,
+                    sample_ceiling=config.sample_ceiling,
+                )
+                comp_df = sample_dataframe(spark, comp_table, comp_plan)
+                comp_metrics = compute_comparison_metrics(sampled_df, comp_df, compare_exps)
+                raw_metrics.update(comp_metrics)
     except Exception as e:
         for exp in expectations:
             results.append(TestResult(
@@ -157,6 +176,64 @@ def _compute_confidence(
             observed=float(count), ci_lower=float(count), ci_upper=float(count),
             confidence=1.0, method="exact",
             sample_size=sample_size, passed=bool(passed),
+        )
+
+    # Comparison metrics
+    if exp.metric == "mean_diff":
+        return welch_t_confidence_interval(
+            mean1=metrics["target_mean"], std1=metrics["target_std"], n1=metrics["target_n"],
+            mean2=metrics["expected_mean"], std2=metrics["expected_std"], n2=metrics["expected_n"],
+            confidence=exp.confidence,
+            threshold=exp.threshold, direction=exp.direction,
+        )
+
+    if exp.metric == "distribution_shift":
+        ks = metrics["ks_statistic"]
+        passed = True
+        if exp.direction == "below" and exp.threshold is not None:
+            passed = ks < exp.threshold
+        elif exp.direction == "above" and exp.threshold is not None:
+            passed = ks > exp.threshold
+        return ConfidenceResult(
+            observed=float(ks), ci_lower=float(ks), ci_upper=float(ks),
+            confidence=exp.confidence, method="ks",
+            sample_size=metrics.get("target_n", 0), passed=bool(passed),
+        )
+
+    if exp.metric == "row_count_ratio":
+        ratio = metrics.get("ratio", 0)
+        passed = True
+        if exp.direction == "between" and exp.threshold_low is not None and exp.threshold_high is not None:
+            passed = exp.threshold_low <= ratio <= exp.threshold_high
+        elif exp.direction == "below" and exp.threshold is not None:
+            passed = ratio < exp.threshold
+        elif exp.direction == "above" and exp.threshold is not None:
+            passed = ratio > exp.threshold
+        return ConfidenceResult(
+            observed=float(ratio), ci_lower=float(ratio), ci_upper=float(ratio),
+            confidence=1.0, method="exact",
+            sample_size=metrics.get("target_count", 0), passed=bool(passed),
+        )
+
+    if exp.metric == "null_rate_diff":
+        diff = metrics.get("diff", 0)
+        passed = True
+        if exp.direction == "below" and exp.threshold is not None:
+            passed = diff < exp.threshold
+        return ConfidenceResult(
+            observed=float(diff), ci_lower=float(diff), ci_upper=float(diff),
+            confidence=exp.confidence, method="exact",
+            sample_size=metrics.get("target_n", 0), passed=bool(passed),
+        )
+
+    if exp.metric == "schema_match":
+        match = metrics.get("match", False)
+        return ConfidenceResult(
+            observed=1.0 if match else 0.0,
+            ci_lower=1.0 if match else 0.0,
+            ci_upper=1.0 if match else 0.0,
+            confidence=1.0, method="exact",
+            sample_size=0, passed=bool(match),
         )
 
     raise ValueError(f"Unknown metric: {exp.metric}")
