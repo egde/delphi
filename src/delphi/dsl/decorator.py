@@ -8,8 +8,15 @@ from collections.abc import Callable
 from delphi.assertions.dataset import Dataset
 
 
-def datatest(table: str) -> Callable:
-    """Decorator that marks a function as a Delphi data test."""
+def datatest(table: str, time_column: str | None = None) -> Callable:
+    """Decorator that marks a function as a Delphi data test.
+
+    Args:
+        table: Fully qualified table name (catalog.schema.table).
+        time_column: Explicit time column for stratified sampling.
+            Overrides auto-detection when set. Useful when a table
+            has multiple date/timestamp columns.
+    """
     def decorator(fn: Callable) -> Callable:
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
@@ -17,6 +24,7 @@ def datatest(table: str) -> Callable:
             fn(ds, *args, **kwargs)
             return ds
         wrapper._delphi_table = table
+        wrapper._delphi_time_column = time_column
         wrapper._delphi_fn = fn
         return wrapper
     return decorator

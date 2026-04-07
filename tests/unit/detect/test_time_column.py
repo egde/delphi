@@ -57,3 +57,33 @@ def test_ambiguous_returns_none():
         _prescan([ColumnInfo("ts1", "timestamp"), ColumnInfo("ts2", "timestamp")])
     )
     assert result is None
+
+
+def test_explicit_overrides_auto_detection():
+    """Explicit time column bypasses heuristic."""
+    prescan = _prescan(
+        [ColumnInfo("id", "int"), ColumnInfo("ts1", "timestamp"), ColumnInfo("ts2", "timestamp")],
+    )
+    # Would be ambiguous without explicit
+    assert detect_time_column(prescan) is None
+    # Explicit picks ts2
+    assert detect_time_column(prescan, explicit="ts2") == "ts2"
+
+
+def test_explicit_overrides_partition_preference():
+    """Explicit time column wins even over partition column."""
+    prescan = _prescan(
+        [ColumnInfo("date", "date"), ColumnInfo("updated_at", "timestamp")],
+        partition_cols=["date"],
+    )
+    # Auto would pick date (partition)
+    assert detect_time_column(prescan) == "date"
+    # Explicit picks updated_at
+    assert detect_time_column(prescan, explicit="updated_at") == "updated_at"
+
+
+def test_explicit_nonexistent_returns_none():
+    """Explicit column that doesn't exist returns None."""
+    prescan = _prescan([ColumnInfo("id", "int"), ColumnInfo("date", "date")])
+    result = detect_time_column(prescan, explicit="nonexistent")
+    assert result is None

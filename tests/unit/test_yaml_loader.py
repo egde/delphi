@@ -64,3 +64,20 @@ checks:
 """
     result = load_yaml_checks(yaml_str)
     assert result.expectations[0].confidence == 0.99
+
+
+def test_time_column_in_yaml():
+    yaml_str = """
+table: t
+time_column: updated_at
+checks:
+  - column: x
+    null_rate: "< 0.01"
+"""
+    result = load_yaml_checks(yaml_str)
+    assert result.time_column == "updated_at"
+
+
+def test_time_column_absent_defaults_none():
+    result = load_yaml_checks(BASIC_YAML)
+    assert result.time_column is None
