@@ -29,6 +29,8 @@ class TestResult:
     evidence: list[dict] = field(default_factory=list)
     error: str | None = None
     suggestion: str | None = None
+    drift: dict | None = None
+    baseline_observed: float | None = None
 
 
 def run_expectations(
@@ -122,6 +124,22 @@ def run_expectations(
                 status="error",
                 error=str(e),
             ))
+
+    # Drift detection and history
+    if config.enable_history:
+        from delphi.history import save_run, load_baseline, detect_drift
+
+        for r in results:
+            if r.confidence_result:
+                baseline = load_baseline(r.test_name, r.table, config.history_path)
+                if baseline:
+                    r.baseline_observed = baseline.get("observed")
+                    drift = detect_drift(
+                        r.confidence_result.observed, baseline, config.drift_threshold
+                    )
+                    r.drift = drift
+
+        save_run(results, config.history_path)
 
     return results
 

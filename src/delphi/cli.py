@@ -38,8 +38,9 @@ def setup(profile, verify):
 @click.option("--confidence", type=float, default=None)
 @click.option("--sample-ceiling", type=int, default=None)
 @click.option("--time-column", default=None, help="Explicit time column for stratified sampling.")
+@click.option("--no-history", is_flag=True, help="Disable run history and drift detection.")
 @click.option("--profile", default=None, help="Named connection profile.")
-def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, time_column, profile):
+def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, time_column, no_history, profile):
     """Run data tests from Python files or YAML."""
     import importlib.util
     from pathlib import Path as P
@@ -64,6 +65,8 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
         config.evidence_rows = 0
     if time_column is not None:
         config.time_column = time_column
+    if no_history:
+        config.enable_history = False
 
     import time as _time
 
@@ -149,6 +152,46 @@ def inspect(table, profile):
     for col_info in result.columns.values():
         col_table.add_row(col_info.name, col_info.dtype)
     con.print(col_table)
+
+
+@main.command()
+@click.argument("test_name")
+@click.argument("table")
+@click.option("--limit", default=20, help="Number of history entries to show.")
+def history(test_name, table, limit):
+    """Show run history for a test."""
+    from pathlib import Path as P
+    from rich.console import Console
+    from rich.table import Table as RichTable
+
+    from delphi.config import load_config
+    from delphi.history import load_history
+
+    config = load_config(config_path=P("delphi.toml"))
+    entries = load_history(test_name, table, config.history_path, limit=limit)
+
+    if not entries:
+        click.echo(f"No history found for {test_name} on {table}")
+        return
+
+    con = Console()
+    t = RichTable(title=f"History: {test_name}")
+    t.add_column("Run ID")
+    t.add_column("Timestamp")
+    t.add_column("Status")
+    t.add_column("Observed", justify="right")
+    t.add_column("CI", justify="right")
+    t.add_column("Duration", justify="right")
+
+    for e in entries:
+        status = e.get("status", "?")
+        observed = f"{e['observed']:.4f}" if e.get("observed") is not None else "-"
+        ci = f"[{e['ci_lower']:.4f}, {e['ci_upper']:.4f}]" if e.get("ci_lower") is not None else "-"
+        duration = f"{e.get('duration_ms', 0)}ms"
+        ts = e.get("timestamp", "")[:19]  # Trim to seconds
+        t.add_row(e.get("run_id", "?"), ts, status, observed, ci, duration)
+
+    con.print(t)
 
 
 def _run_python_tests(py_file, spark, config, all_results):

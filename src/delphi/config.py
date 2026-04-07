@@ -29,6 +29,9 @@ class DelphiConfig:
     connection_retries: int = 3
     connection_timeout: int = 300
     time_column: str = ""
+    history_path: str = ".delphi/history.jsonl"
+    enable_history: bool = True
+    drift_threshold: float = 2.0
     time_column_names: list[str] = field(
         default_factory=lambda: [
             "timestamp", "created_at", "event_time", "date", "event_date",
@@ -61,6 +64,9 @@ def load_config(config_path: Path | None = None) -> DelphiConfig:
         sample_ceiling=delphi_section.get("sample_ceiling", 100000),
         evidence_rows=delphi_section.get("evidence_rows", 10),
         time_column=delphi_section.get("time_column", ""),
+        history_path=delphi_section.get("history_path", ".delphi/history.jsonl"),
+        enable_history=delphi_section.get("enable_history", True),
+        drift_threshold=delphi_section.get("drift_threshold", 2.0),
         redact_columns=delphi_section.get("redact_columns", []),
         connection_retries=delphi_section.get("connection_retries", 3),
         connection_timeout=delphi_section.get("connection_timeout", 300),

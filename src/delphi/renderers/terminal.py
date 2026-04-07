@@ -51,6 +51,17 @@ def render_terminal(results: list[dict], console: Console | None = None, total_m
 
     console.print(table)
 
+    # Drift indicators
+    for r in results:
+        drift = r.get("drift")
+        if drift:
+            arrow = "\u2191" if drift["direction"] == "up" else "\u2193"
+            console.print(
+                f"  [yellow]{arrow} {r.get('test_name', '?')}: "
+                f"{drift['shift_value']:+.6f} from baseline "
+                f"({drift['shift_magnitude']:.1f} SE)[/yellow]"
+            )
+
     for r in results:
         if r.get("error"):
             console.print(f"\n  [red]ERROR:[/red] {r['error']}")
