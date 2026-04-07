@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from delphi.config import ConnectionConfig, DelphiConfig
@@ -41,6 +42,10 @@ def get_spark_session(
 
     if conn.auth_type == "pat" and conn.token:
         builder = builder.token(conn.token)
+    elif conn.auth_type == "env":
+        token = os.environ.get("DATABRICKS_TOKEN", "")
+        if token:
+            builder = builder.token(token)
 
     return builder.getOrCreate()
 
