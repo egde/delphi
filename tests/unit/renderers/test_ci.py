@@ -22,12 +22,13 @@ def _result(passed=True, status="pass"):
 
 
 def test_render_json_structure():
-    output = render_json([_result()])
+    output = render_json([_result()], total_ms=1500)
     data = json.loads(output)
-    assert isinstance(data, list)
-    assert data[0]["test"] == "test_nulls"
-    assert data[0]["status"] == "pass"
-    assert data[0]["confidence"] == 0.95
+    assert data["total_duration_ms"] == 1500
+    assert isinstance(data["results"], list)
+    assert data["results"][0]["test"] == "test_nulls"
+    assert data["results"][0]["status"] == "pass"
+    assert data["results"][0]["confidence"] == 0.95
 
 
 def test_render_json_error():
@@ -36,8 +37,8 @@ def test_render_json_error():
     r["suggestion"] = "Did you mean X?"
     output = render_json([r])
     data = json.loads(output)
-    assert data[0]["error_type"] == "error"
-    assert "Column not found" in data[0]["message"]
+    assert data["results"][0]["error_type"] == "error"
+    assert "Column not found" in data["results"][0]["message"]
 
 
 def test_render_junit_xml_valid():
@@ -54,3 +55,10 @@ def test_render_junit_xml_failure():
     root = ET.fromstring(output)
     failure = root.find(".//failure")
     assert failure is not None
+
+
+def test_render_junit_xml_total_time():
+    output = render_junit_xml([_result()], total_ms=3500)
+    root = ET.fromstring(output)
+    ts = root.find(".//testsuite")
+    assert ts.attrib["time"] == "3.5"

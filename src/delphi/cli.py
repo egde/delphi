@@ -38,8 +38,9 @@ def setup(profile, verify):
 @click.option("--confidence", type=float, default=None)
 @click.option("--sample-ceiling", type=int, default=None)
 @click.option("--time-column", default=None, help="Explicit time column for stratified sampling.")
+@click.option("--no-history", is_flag=True, help="Disable run history and drift detection.")
 @click.option("--profile", default=None, help="Named connection profile.")
-def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, time_column, profile):
+def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, time_column, no_history, profile):
     """Run data tests from Python files or YAML."""
     import importlib.util
     from pathlib import Path as P
@@ -64,11 +65,16 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
         config.evidence_rows = 0
     if time_column is not None:
         config.time_column = time_column
+    if no_history:
+        config.enable_history = False
+
+    import time as _time
 
     spark = get_spark_session(config, profile=profile)
 
     target = P(path)
     all_results = []
+    run_start = _time.monotonic()
 
     if target.suffix in (".yaml", ".yml"):
         yaml_str = target.read_text()
@@ -86,16 +92,25 @@ def run(path, output, evidence_rows, no_evidence, confidence, sample_ceiling, ti
     elif target.suffix == ".py":
         _run_python_tests(target, spark, config, all_results)
 
+    total_ms = int((_time.monotonic() - run_start) * 1000)
     renderer = output or detect_renderer()
     result_dicts = [_result_to_dict(r) for r in all_results]
 
     if renderer == "terminal":
-        render_terminal(result_dicts)
+        render_terminal(result_dicts, total_ms=total_ms)
+    elif renderer == "notebook":
+        from delphi.renderers.notebook import render_notebook
+        html = render_notebook(result_dicts, total_ms=total_ms)
+        try:
+            from dbruntime.display import displayHTML
+            displayHTML(html)
+        except ImportError:
+            click.echo(html)
     elif renderer == "json":
-        click.echo(render_json(result_dicts))
+        click.echo(render_json(result_dicts, total_ms=total_ms))
     elif renderer == "ci":
-        click.echo(render_json(result_dicts))
-        junit = render_junit_xml(result_dicts)
+        click.echo(render_json(result_dicts, total_ms=total_ms))
+        junit = render_junit_xml(result_dicts, total_ms=total_ms)
         P("delphi-results.xml").write_text(junit)
         click.echo("JUnit XML written to delphi-results.xml")
 
@@ -137,6 +152,46 @@ def inspect(table, profile):
     for col_info in result.columns.values():
         col_table.add_row(col_info.name, col_info.dtype)
     con.print(col_table)
+
+
+@main.command()
+@click.argument("test_name")
+@click.argument("table")
+@click.option("--limit", default=20, help="Number of history entries to show.")
+def history(test_name, table, limit):
+    """Show run history for a test."""
+    from pathlib import Path as P
+    from rich.console import Console
+    from rich.table import Table as RichTable
+
+    from delphi.config import load_config
+    from delphi.history import load_history
+
+    config = load_config(config_path=P("delphi.toml"))
+    entries = load_history(test_name, table, config.history_path, limit=limit)
+
+    if not entries:
+        click.echo(f"No history found for {test_name} on {table}")
+        return
+
+    con = Console()
+    t = RichTable(title=f"History: {test_name}")
+    t.add_column("Run ID")
+    t.add_column("Timestamp")
+    t.add_column("Status")
+    t.add_column("Observed", justify="right")
+    t.add_column("CI", justify="right")
+    t.add_column("Duration", justify="right")
+
+    for e in entries:
+        status = e.get("status", "?")
+        observed = f"{e['observed']:.4f}" if e.get("observed") is not None else "-"
+        ci = f"[{e['ci_lower']:.4f}, {e['ci_upper']:.4f}]" if e.get("ci_lower") is not None else "-"
+        duration = f"{e.get('duration_ms', 0)}ms"
+        ts = e.get("timestamp", "")[:19]  # Trim to seconds
+        t.add_row(e.get("run_id", "?"), ts, status, observed, ci, duration)
+
+    con.print(t)
 
 
 def _run_python_tests(py_file, spark, config, all_results):

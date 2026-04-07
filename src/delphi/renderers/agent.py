@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-def render_agent(results: list[dict]) -> list[dict]:
-    """Convert results to clean structured dicts for programmatic use."""
+def render_agent(results: list[dict], total_ms: int = 0) -> dict:
+    """Convert results to clean structured dict for programmatic use."""
     output = []
     for r in results:
         cr = r.get("confidence_result")
@@ -25,4 +25,4 @@ def render_agent(results: list[dict]) -> list[dict]:
             "evidence": r.get("evidence", []),
         }
         output.append(entry)
-    return output
+    return {"total_duration_ms": total_ms, "results": output}
