@@ -86,28 +86,27 @@ def _compute_match_rate(
 
     if tolerance == 0:
         # Exact match
-        exact_matches = joined.filter(
-            F.col(exp_col).eqNullSafe(F.col(tgt_col))
-        ).count()
+        match_condition = F.col(exp_col).eqNullSafe(F.col(tgt_col))
     else:
-        # Within tolerance (relative)
-        exact_matches = joined.filter(
-            (F.abs(F.col(tgt_col) - F.col(exp_col)) / F.abs(F.col(exp_col))) <= tolerance
-        ).count()
+        # Within tolerance (relative). Use try_divide to handle expected=0 safely:
+        # - If expected == 0, try_divide returns NULL
+        # - Fall back to exact match in that case so (0, 0) still counts as match
+        rel_dev = F.try_divide(
+            F.abs(F.col(tgt_col) - F.col(exp_col)),
+            F.abs(F.col(exp_col)),
+        )
+        match_condition = (
+            (rel_dev <= tolerance)
+            | (rel_dev.isNull() & F.col(exp_col).eqNullSafe(F.col(tgt_col)))
+        )
 
+    exact_matches = joined.filter(match_condition).count()
     mismatch_count = matched_count - exact_matches
 
     # Collect sample mismatches for evidence
     mismatches = []
     if mismatch_count > 0:
-        if tolerance == 0:
-            mismatch_df = joined.filter(
-                ~F.col(exp_col).eqNullSafe(F.col(tgt_col))
-            )
-        else:
-            mismatch_df = joined.filter(
-                (F.abs(F.col(tgt_col) - F.col(exp_col)) / F.abs(F.col(exp_col))) > tolerance
-            )
+        mismatch_df = joined.filter(~match_condition)
 
         mismatch_rows = mismatch_df.select(
             *[F.col(f"exp.{k}").alias(k) for k in key_columns],
@@ -131,7 +130,7 @@ def _compute_match_rate(
     return {
         "matches": exact_matches,
         "total": matched_count,
-        "rate": exact_matches / matched_count,
+        "rate": exact_matches / matched_count if matched_count > 0 else 0.0,
         "mismatch_count": mismatch_count,
         "mismatches": mismatches,
     }
@@ -153,17 +152,16 @@ def _compute_mean_deviation(
     exp_col = f"exp.{value_column}"
     tgt_col = f"tgt.{value_column}"
 
-    # Mean absolute relative deviation
+    # Mean absolute relative deviation. Use try_divide to safely handle
+    # expected=0 (returns NULL, which aggregates ignore).
+    rel_dev = F.try_divide(
+        F.abs(F.col(tgt_col) - F.col(exp_col)),
+        F.abs(F.col(exp_col)),
+    )
     stats = joined.agg(
-        F.avg(
-            F.abs(F.col(tgt_col) - F.col(exp_col)) / F.abs(F.col(exp_col))
-        ).alias("mean_dev"),
-        F.max(
-            F.abs(F.col(tgt_col) - F.col(exp_col)) / F.abs(F.col(exp_col))
-        ).alias("max_dev"),
-        F.stddev(
-            F.abs(F.col(tgt_col) - F.col(exp_col)) / F.abs(F.col(exp_col))
-        ).alias("std_dev"),
+        F.avg(rel_dev).alias("mean_dev"),
+        F.max(rel_dev).alias("max_dev"),
+        F.stddev(rel_dev).alias("std_dev"),
     ).collect()[0]
 
     return {
