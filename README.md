@@ -18,7 +18,7 @@ def test_revenue_quality(dt):
 
 Full row-level scans are infeasible on large Delta tables. Delphi samples intelligently and uses statistical confidence intervals to determine pass/fail, giving you fast, reliable data quality checks with quantified uncertainty.
 
-- **Fast** -- Adaptive sampling reads thousands of rows, not billions
+- **Fast** -- Adaptive sampling reads thousands of rows, not billions; a whole test batch runs as a single aggregation pass over one cached sample
 - **Statistically rigorous** -- Wilson, t-distribution, and bootstrap confidence intervals
 - **PySpark-native** -- `col()`, operator overloading, and `functions as F` feel like PySpark
 - **Two-layer API** -- Python DSL for engineers, YAML for analysts
@@ -309,9 +309,9 @@ Table ref --> Pre-scan --> Sample --> Metrics --> Confidence --> Result
 
 1. **Pre-scan** -- Reads Delta file stats (`DESCRIBE DETAIL`) for free. Column-level null counts, min/max, row count. Short-circuits trivially passing checks without scanning a single row.
 
-2. **Adaptive Sampling** -- Computes the minimum sample size needed for the desired confidence and margin of error. Floors at 1,000 rows, caps at 100,000. For timeseries tables, auto-detects the time column and applies stratified sampling.
+2. **Adaptive Sampling** -- Computes the minimum sample size needed for the desired confidence and margin of error. Floors at 1,000 rows, caps at 100,000. Uses fraction-based (Bernoulli) sampling, which avoids a full-table sort, then materializes the sample once (cached) so every downstream read hits the same rows. For timeseries tables, auto-detects the time column and applies stratified sampling.
 
-3. **Metric Computation** -- Runs PySpark aggregations on the sampled DataFrame. Multiple expectations on the same table share one sample.
+3. **Metric Computation** -- Runs every column metric for a test batch in a *single* fused PySpark aggregation over the one cached sample -- one job for the whole batch, not one action per expectation. Uniqueness uses HyperLogLog (`approx_count_distinct`) so it stays within that same pass. The confidence math reads the actual observed row count, so approximate sample sizes remain statistically valid.
 
 4. **Confidence Intervals** -- Routes each metric to the appropriate statistical method:
 
