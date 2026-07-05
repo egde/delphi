@@ -1,6 +1,6 @@
 """Delphi — Probabilistic data test framework for Databricks."""
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 from delphi.assertions.column import col
 from delphi.assertions.dataset import Dataset
