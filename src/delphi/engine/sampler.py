@@ -38,11 +38,16 @@ def compute_sample_size(
 
 
 def sample_dataframe(spark, table: str, plan: SamplePlan, time_column: str | None = None):
-    """Execute sampling against the table, returning a PySpark DataFrame."""
+    """Execute sampling against the table, returning a PySpark DataFrame.
+
+    Uses Bernoulli fraction sampling (no full-table sort). A 10% headroom is
+    applied so undershoot rarely drops below the sample floor; the actual
+    observed row count is used as n downstream.
+    """
     df = spark.table(table)
 
     if plan.use_full_table:
         return df
 
-    from pyspark.sql.functions import rand
-    return df.orderBy(rand()).limit(plan.n)
+    fraction = min(1.0, plan.fraction * 1.10)
+    return df.sample(withReplacement=False, fraction=fraction)

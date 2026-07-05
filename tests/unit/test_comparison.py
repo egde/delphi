@@ -1,7 +1,10 @@
 """Tests for comparison metric computation and confidence."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from delphi.runner import _compute_confidence
+from delphi.engine.metrics import compute_comparison_metrics
 from delphi.assertions.expectation import Expectation
 from delphi.confidence.means import welch_t_confidence_interval
 
@@ -82,3 +85,65 @@ def test_compute_confidence_schema_mismatch():
     metrics = {"match": False, "target_schema": {"a": "int"}, "expected_schema": {"a": "string"}}
     result = _compute_confidence(exp, metrics, sample_size=0)
     assert result.passed == False
+
+
+def _mock_side(agg_row: dict):
+    df = MagicMock()
+    df.agg.return_value.collect.return_value = [agg_row]
+    return df
+
+
+def test_mean_diff_uses_single_agg_per_side():
+    exp = Expectation(column="revenue", metric="mean_diff", threshold=0.05,
+                      direction="below", compare_table="other")
+    df_t = _mock_side({"mean__revenue": 100.0, "std__revenue": 5.0, "cnt": 1000})
+    df_e = _mock_side({"mean__revenue": 98.0, "std__revenue": 4.0, "cnt": 900})
+
+    results = compute_comparison_metrics(df_t, df_e, [exp])
+
+    df_t.agg.assert_called_once()
+    df_e.agg.assert_called_once()
+    m = results["revenue:mean_diff"]
+    assert m["target_mean"] == 100.0
+    assert m["target_n"] == 1000
+    assert m["expected_mean"] == 98.0
+    assert m["expected_n"] == 900
+
+
+def test_null_rate_diff_reads_fused_agg_row():
+    exp = Expectation(column="email", metric="null_rate_diff", threshold=0.02,
+                      direction="below", compare_table="other")
+    df_t = _mock_side({"nr__email": 30, "cnt": 1000})   # 3% nulls
+    df_e = _mock_side({"nr__email": 10, "cnt": 1000})   # 1% nulls
+
+    results = compute_comparison_metrics(df_t, df_e, [exp])
+
+    df_t.agg.assert_called_once()
+    df_e.agg.assert_called_once()
+    m = results["email:null_rate_diff"]
+    assert m["target_rate"] == 0.03
+    assert m["expected_rate"] == 0.01
+    assert m["diff"] == pytest.approx(0.02)
+    assert m["target_n"] == 1000
+    assert m["expected_n"] == 1000
+
+
+def test_multiple_comparison_metrics_one_agg_per_side():
+    exps = [
+        Expectation(column="revenue", metric="mean_diff", threshold=0.05,
+                    direction="below", compare_table="other"),
+        Expectation(column="email", metric="null_rate_diff", threshold=0.02,
+                    direction="below", compare_table="other"),
+    ]
+    df_t = _mock_side({"mean__revenue": 100.0, "std__revenue": 5.0,
+                       "nr__email": 20, "cnt": 1000})
+    df_e = _mock_side({"mean__revenue": 98.0, "std__revenue": 4.0,
+                       "nr__email": 10, "cnt": 1000})
+
+    results = compute_comparison_metrics(df_t, df_e, exps)
+
+    # both metrics computed from a SINGLE agg per side
+    df_t.agg.assert_called_once()
+    df_e.agg.assert_called_once()
+    assert results["revenue:mean_diff"]["target_mean"] == 100.0
+    assert results["email:null_rate_diff"]["target_rate"] == 0.02

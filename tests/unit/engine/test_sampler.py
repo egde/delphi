@@ -1,4 +1,7 @@
-from delphi.engine.sampler import compute_sample_size, SamplePlan
+import pytest
+from unittest.mock import MagicMock
+
+from delphi.engine.sampler import compute_sample_size, sample_dataframe, SamplePlan
 from delphi.engine.prescan import PrescanResult, ColumnInfo
 
 
@@ -41,3 +44,29 @@ def test_compute_sample_size_small_table():
     )
     assert plan.n == 100
     assert plan.use_full_table is True
+
+
+def test_sample_dataframe_uses_fraction_not_sort():
+    df = MagicMock()
+    spark = MagicMock()
+    spark.table.return_value = df
+    plan = SamplePlan(n=1000, fraction=0.001, use_full_table=False)
+
+    sample_dataframe(spark, "t", plan)
+
+    df.sample.assert_called_once()
+    _, kwargs = df.sample.call_args
+    assert kwargs["withReplacement"] is False
+    # 10% headroom applied over plan.fraction
+    assert kwargs["fraction"] == pytest.approx(0.0011)
+    df.orderBy.assert_not_called()
+
+
+def test_sample_dataframe_full_table_returns_df_unchanged():
+    df = MagicMock()
+    spark = MagicMock()
+    spark.table.return_value = df
+    plan = SamplePlan(n=100, fraction=1.0, use_full_table=True)
+
+    assert sample_dataframe(spark, "t", plan) is df
+    df.sample.assert_not_called()

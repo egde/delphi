@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from difflib import get_close_matches
@@ -17,6 +18,8 @@ from delphi.engine.metrics import compute_metrics, compute_comparison_metrics, C
 from delphi.engine.reconciliation import compute_reconciliation_metrics, RECONCILIATION_METRICS
 from delphi.evidence import collect_evidence
 from delphi.detect.time_column import detect_time_column
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -44,119 +47,134 @@ def run_expectations(
     """Run a batch of expectations against a table through the full pipeline."""
     results = []
     prescan = None
+    sampled_df = None
+    cached_dfs = []
 
     try:
-        prescan = prescan_table(spark, table)
-        time_col = detect_time_column(
-            prescan, config.time_column_names,
-            explicit=config.time_column or None,
-        )
-        sample_plan = compute_sample_size(
-            prescan, confidence=config.default_confidence,
-            sample_floor=config.sample_floor,
-            sample_ceiling=config.sample_ceiling,
-        )
-        sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
-
-        # Split expectations into regular, comparison, and reconciliation
-        regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS and e.metric not in RECONCILIATION_METRICS]
-        compare_exps = [e for e in expectations if e.metric in COMPARISON_METRICS]
-        recon_exps = [e for e in expectations if e.metric in RECONCILIATION_METRICS]
-
-        raw_metrics = compute_metrics(sampled_df, regular_exps)
-        # row_count should use the full table count, not the sampled count
-        if "row_count" in raw_metrics:
-            raw_metrics["row_count"]["count"] = prescan.row_count
-
-        # Handle comparison metrics — sample the comparison table too
-        if compare_exps:
-            compare_tables = {e.compare_table for e in compare_exps if e.compare_table}
-            for comp_table in compare_tables:
-                comp_prescan = prescan_table(spark, comp_table)
-                comp_plan = compute_sample_size(
-                    comp_prescan, confidence=config.default_confidence,
-                    sample_floor=config.sample_floor,
-                    sample_ceiling=config.sample_ceiling,
-                )
-                comp_df = sample_dataframe(spark, comp_table, comp_plan)
-                comp_metrics = compute_comparison_metrics(sampled_df, comp_df, compare_exps)
-                raw_metrics.update(comp_metrics)
-
-        # Handle reconciliation metrics — use full target table (not sampled) for join accuracy
-        if recon_exps:
-            df_full_target = spark.table(table)
-            recon_tables = {e.compare_table for e in recon_exps if e.compare_table}
-            for recon_table in recon_tables:
-                df_expected = spark.table(recon_table)
-                recon_metrics = compute_reconciliation_metrics(df_full_target, df_expected, recon_exps)
-                raw_metrics.update(recon_metrics)
-    except Exception as e:
-        for exp in expectations:
-            results.append(TestResult(
-                test_name=_exp_name(test_name, exp),
-                table=table,
-                status="error",
-                error=str(e),
-                suggestion=_suggest_fix(e, prescan, exp),
-            ))
-        return results
-
-    for exp in expectations:
-        start = time.monotonic()
-        key = f"{exp.column}:{exp.metric}" if exp.column else exp.metric
-        metric_data = raw_metrics.get(key, {})
-
         try:
-            cr = _compute_confidence(exp, metric_data, sample_plan.n)
-            status = "pass" if cr.passed else "fail"
+            prescan = prescan_table(spark, table)
+            time_col = detect_time_column(
+                prescan, config.time_column_names,
+                explicit=config.time_column or None,
+            )
+            sample_plan = compute_sample_size(
+                prescan, confidence=config.default_confidence,
+                sample_floor=config.sample_floor,
+                sample_ceiling=config.sample_ceiling,
+            )
+            sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
+            # Cache so the metric pass and evidence-collection pass read the same
+            # physical rows — a lazy sample would otherwise re-randomize between them.
+            sampled_df.cache()
+            cached_dfs.append(sampled_df)
 
-            evidence = []
-            if status == "fail" and config.evidence_rows > 0:
-                # Reconciliation metrics have mismatches built in
-                if exp.metric == "match_rate" and "mismatches" in metric_data:
-                    evidence = metric_data["mismatches"][:config.evidence_rows]
-                elif exp.metric not in RECONCILIATION_METRICS:
-                    evidence = collect_evidence(
-                        sampled_df, exp,
-                        max_rows=config.evidence_rows,
-                        redact_columns=config.redact_columns,
+            # Split expectations into regular, comparison, and reconciliation
+            regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS and e.metric not in RECONCILIATION_METRICS]
+            compare_exps = [e for e in expectations if e.metric in COMPARISON_METRICS]
+            recon_exps = [e for e in expectations if e.metric in RECONCILIATION_METRICS]
+
+            raw_metrics = compute_metrics(sampled_df, regular_exps)
+            # row_count should use the full table count, not the sampled count
+            if "row_count" in raw_metrics:
+                raw_metrics["row_count"]["count"] = prescan.row_count
+
+            # Handle comparison metrics — sample the comparison table too
+            if compare_exps:
+                compare_tables = {e.compare_table for e in compare_exps if e.compare_table}
+                for comp_table in compare_tables:
+                    comp_prescan = prescan_table(spark, comp_table)
+                    comp_plan = compute_sample_size(
+                        comp_prescan, confidence=config.default_confidence,
+                        sample_floor=config.sample_floor,
+                        sample_ceiling=config.sample_ceiling,
                     )
+                    comp_df = sample_dataframe(spark, comp_table, comp_plan)
+                    comp_df.cache()
+                    cached_dfs.append(comp_df)
+                    comp_metrics = compute_comparison_metrics(sampled_df, comp_df, compare_exps)
+                    raw_metrics.update(comp_metrics)
 
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            results.append(TestResult(
-                test_name=_exp_name(test_name, exp),
-                table=table,
-                status=status,
-                confidence_result=cr,
-                threshold=_format_threshold(exp),
-                duration_ms=elapsed_ms,
-                evidence=evidence,
-            ))
+            # Handle reconciliation metrics — use full target table (not sampled) for join accuracy
+            if recon_exps:
+                df_full_target = spark.table(table)
+                recon_tables = {e.compare_table for e in recon_exps if e.compare_table}
+                for recon_table in recon_tables:
+                    df_expected = spark.table(recon_table)
+                    recon_metrics = compute_reconciliation_metrics(df_full_target, df_expected, recon_exps)
+                    raw_metrics.update(recon_metrics)
         except Exception as e:
-            results.append(TestResult(
-                test_name=_exp_name(test_name, exp),
-                table=table,
-                status="error",
-                error=str(e),
-            ))
+            for exp in expectations:
+                results.append(TestResult(
+                    test_name=_exp_name(test_name, exp),
+                    table=table,
+                    status="error",
+                    error=str(e),
+                    suggestion=_suggest_fix(e, prescan, exp),
+                ))
+            return results
 
-    # Drift detection and history
-    if config.enable_history:
-        from delphi.history import save_run, load_baseline, detect_drift
+        for exp in expectations:
+            start = time.monotonic()
+            key = f"{exp.column}:{exp.metric}" if exp.column else exp.metric
+            metric_data = raw_metrics.get(key, {})
 
-        for r in results:
-            if r.confidence_result:
-                baseline = load_baseline(r.test_name, r.table, config.history_path)
-                if baseline:
-                    r.baseline_observed = baseline.get("observed")
-                    drift = detect_drift(
-                        r.confidence_result.observed, baseline, config.drift_threshold
-                    )
-                    r.drift = drift
+            try:
+                cr = _compute_confidence(exp, metric_data, sample_plan.n)
+                status = "pass" if cr.passed else "fail"
 
-        save_run(results, config.history_path)
+                evidence = []
+                if status == "fail" and config.evidence_rows > 0:
+                    # Reconciliation metrics have mismatches built in
+                    if exp.metric == "match_rate" and "mismatches" in metric_data:
+                        evidence = metric_data["mismatches"][:config.evidence_rows]
+                    elif exp.metric not in RECONCILIATION_METRICS:
+                        evidence = collect_evidence(
+                            sampled_df, exp,
+                            max_rows=config.evidence_rows,
+                            redact_columns=config.redact_columns,
+                        )
 
-    return results
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+                results.append(TestResult(
+                    test_name=_exp_name(test_name, exp),
+                    table=table,
+                    status=status,
+                    confidence_result=cr,
+                    threshold=_format_threshold(exp),
+                    duration_ms=elapsed_ms,
+                    evidence=evidence,
+                ))
+            except Exception as e:
+                results.append(TestResult(
+                    test_name=_exp_name(test_name, exp),
+                    table=table,
+                    status="error",
+                    error=str(e),
+                ))
+
+        # Drift detection and history
+        if config.enable_history:
+            from delphi.history import save_run, load_baseline, detect_drift
+
+            for r in results:
+                if r.confidence_result:
+                    baseline = load_baseline(r.test_name, r.table, config.history_path)
+                    if baseline:
+                        r.baseline_observed = baseline.get("observed")
+                        drift = detect_drift(
+                            r.confidence_result.observed, baseline, config.drift_threshold
+                        )
+                        r.drift = drift
+
+            save_run(results, config.history_path)
+
+        return results
+    finally:
+        for _df in cached_dfs:
+            try:
+                _df.unpersist()
+            except Exception as e:
+                logger.debug("Failed to unpersist cached DataFrame: %s", e)
 
 
 def _compute_confidence(
