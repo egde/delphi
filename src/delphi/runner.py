@@ -48,6 +48,7 @@ def run_expectations(
     results = []
     prescan = None
     sampled_df = None
+    cached_dfs = []
 
     try:
         try:
@@ -65,6 +66,7 @@ def run_expectations(
             # Cache so the metric pass and evidence-collection pass read the same
             # physical rows — a lazy sample would otherwise re-randomize between them.
             sampled_df.cache()
+            cached_dfs.append(sampled_df)
 
             # Split expectations into regular, comparison, and reconciliation
             regular_exps = [e for e in expectations if e.metric not in COMPARISON_METRICS and e.metric not in RECONCILIATION_METRICS]
@@ -87,6 +89,8 @@ def run_expectations(
                         sample_ceiling=config.sample_ceiling,
                     )
                     comp_df = sample_dataframe(spark, comp_table, comp_plan)
+                    comp_df.cache()
+                    cached_dfs.append(comp_df)
                     comp_metrics = compute_comparison_metrics(sampled_df, comp_df, compare_exps)
                     raw_metrics.update(comp_metrics)
 
@@ -166,11 +170,11 @@ def run_expectations(
 
         return results
     finally:
-        if sampled_df is not None:
+        for _df in cached_dfs:
             try:
-                sampled_df.unpersist()
+                _df.unpersist()
             except Exception as e:
-                logger.debug("Failed to unpersist sampled DataFrame: %s", e)
+                logger.debug("Failed to unpersist cached DataFrame: %s", e)
 
 
 def _compute_confidence(
