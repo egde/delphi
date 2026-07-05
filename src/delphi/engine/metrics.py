@@ -6,49 +6,59 @@ from delphi.assertions.expectation import Expectation
 
 
 def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
-    """Compute all required metrics from a sampled DataFrame."""
-    results = {}
-    total_count = df.count()
+    """Compute all regular metrics in a single fused aggregation pass.
 
+    Builds one aliased df.agg(...) over every expectation, runs it once, then
+    demultiplexes the single result row back into the {col}:{metric} dict shape
+    that runner._compute_confidence expects.
+    """
+    from pyspark.sql import functions as F
+
+    exprs = []
     for exp in expectations:
-        key = f"{exp.column}:{exp.metric}" if exp.column else exp.metric
-
-        if exp.metric == "null_rate":
-            null_count = df.filter(df[exp.column].isNull()).count()
-            results[key] = {"null_count": null_count, "total": total_count}
-
-        elif exp.metric == "uniqueness":
-            distinct_count = df.select(exp.column).distinct().count()
-            results[key] = {"distinct_count": distinct_count, "total": total_count}
-
-        elif exp.metric == "mean":
-            from pyspark.sql import functions as F
-            row = df.agg(
-                F.avg(exp.column).alias("mean"),
-                F.stddev(exp.column).alias("std"),
-            ).collect()[0]
-            results[key] = {"mean": row["mean"], "std": row["std"], "total": total_count}
-
-        elif exp.metric in ("min", "max"):
-            from pyspark.sql import functions as F
-            func = F.min if exp.metric == "min" else F.max
-            row = df.agg(func(exp.column).alias("value")).collect()[0]
-            results[key] = {"value": row["value"], "total": total_count}
-
-        elif exp.metric == "stddev":
-            from pyspark.sql import functions as F
-            row = df.agg(F.stddev(exp.column).alias("value")).collect()[0]
-            results[key] = {"value": row["value"], "total": total_count}
-
-        elif exp.metric == "percentile":
-            from pyspark.sql import functions as F
+        c, m = exp.column, exp.metric
+        if m == "null_rate":
+            exprs.append(F.sum(F.col(c).isNull().cast("long")).alias(f"nr__{c}"))
+        elif m == "uniqueness":
+            exprs.append(F.approx_count_distinct(c).alias(f"uq__{c}"))
+        elif m == "mean":
+            exprs.append(F.avg(c).alias(f"mean__{c}"))
+            exprs.append(F.stddev(c).alias(f"std__{c}"))
+        elif m == "min":
+            exprs.append(F.min(c).alias(f"min__{c}"))
+        elif m == "max":
+            exprs.append(F.max(c).alias(f"max__{c}"))
+        elif m == "stddev":
+            exprs.append(F.stddev(c).alias(f"sdev__{c}"))
+        elif m == "percentile":
             p = exp.metric_args.get("percentile", 0.5)
-            row = df.agg(
-                F.percentile_approx(exp.column, p).alias("value")
-            ).collect()[0]
-            results[key] = {"value": row["value"], "total": total_count}
+            exprs.append(F.percentile_approx(c, p).alias(f"pct__{c}"))
+        # row_count contributes no expression; it uses the shared count below
 
-        elif exp.metric == "row_count":
+    # Shared total; also covers the row_count-only case.
+    exprs.append(F.count(F.lit(1)).alias("cnt"))
+    row = df.agg(*exprs).collect()[0]
+    total_count = row["cnt"] or 0
+
+    results = {}
+    for exp in expectations:
+        c, m = exp.column, exp.metric
+        key = f"{c}:{m}" if c else m
+        if m == "null_rate":
+            results[key] = {"null_count": row[f"nr__{c}"] or 0, "total": total_count}
+        elif m == "uniqueness":
+            results[key] = {"distinct_count": row[f"uq__{c}"] or 0, "total": total_count}
+        elif m == "mean":
+            results[key] = {"mean": row[f"mean__{c}"], "std": row[f"std__{c}"], "total": total_count}
+        elif m == "min":
+            results[key] = {"value": row[f"min__{c}"], "total": total_count}
+        elif m == "max":
+            results[key] = {"value": row[f"max__{c}"], "total": total_count}
+        elif m == "stddev":
+            results[key] = {"value": row[f"sdev__{c}"], "total": total_count}
+        elif m == "percentile":
+            results[key] = {"value": row[f"pct__{c}"], "total": total_count}
+        elif m == "row_count":
             results[key] = {"count": total_count}
 
     return results
