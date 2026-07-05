@@ -57,3 +57,30 @@ def test_multiple_metrics_single_agg():
     assert results["user_id:uniqueness"] == {"distinct_count": 950, "total": 1000}
     assert results["price:min"]["value"] == 1.0
     assert results["price:max"]["value"] == 998.0
+
+
+def test_stddev_and_percentile_demux():
+    expectations = [
+        Expectation(column="latency", metric="stddev", threshold=50, direction="below"),
+        Expectation(column="latency", metric="percentile", threshold=100, direction="below",
+                    metric_args={"percentile": 0.95}),
+    ]
+    df = _mock_df({"sdev__latency": 12.5, "pct__latency__1": 88.0, "cnt": 1000})
+
+    results = compute_metrics(df, expectations)
+    assert results["latency:stddev"]["value"] == 12.5
+    assert results["latency:percentile"]["value"] == 88.0
+
+
+def test_null_aggregates_are_guarded_to_zero():
+    # An all-null / empty sample draw yields NULL aggregates; they must not propagate None.
+    expectations = [
+        Expectation(column="revenue", metric="mean", threshold=100, direction="below"),
+        Expectation(column="revenue", metric="null_rate", threshold=0.5, direction="below"),
+    ]
+    df = _mock_df({"mean__revenue": None, "std__revenue": None,
+                   "nr__revenue": None, "cnt": 0})
+
+    results = compute_metrics(df, expectations)
+    assert results["revenue:mean"] == {"mean": 0, "std": 0, "total": 0}
+    assert results["revenue:null_rate"] == {"null_count": 0, "total": 0}

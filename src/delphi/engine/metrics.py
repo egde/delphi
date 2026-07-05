@@ -15,7 +15,7 @@ def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
     from pyspark.sql import functions as F
 
     exprs = []
-    for exp in expectations:
+    for i, exp in enumerate(expectations):
         c, m = exp.column, exp.metric
         if m == "null_rate":
             exprs.append(F.sum(F.col(c).isNull().cast("long")).alias(f"nr__{c}"))
@@ -32,7 +32,7 @@ def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
             exprs.append(F.stddev(c).alias(f"sdev__{c}"))
         elif m == "percentile":
             p = exp.metric_args.get("percentile", 0.5)
-            exprs.append(F.percentile_approx(c, p).alias(f"pct__{c}"))
+            exprs.append(F.percentile_approx(c, p).alias(f"pct__{c}__{i}"))
         # row_count contributes no expression; it uses the shared count below
 
     # Shared total; also covers the row_count-only case.
@@ -41,7 +41,12 @@ def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
     total_count = row["cnt"] or 0
 
     results = {}
-    for exp in expectations:
+    # NOTE: results are keyed by f"{col}:{metric}", so two expectations sharing the
+    # same column+metric (e.g. two percentile checks on one column with different p)
+    # collide at the result-dict level — the last one wins. This is a pre-existing
+    # limitation of the {col}:{metric} key scheme (also present in runner lookup) and
+    # is tracked as a follow-up; out of scope for this performance change.
+    for i, exp in enumerate(expectations):
         c, m = exp.column, exp.metric
         key = f"{c}:{m}" if c else m
         if m == "null_rate":
@@ -49,15 +54,15 @@ def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
         elif m == "uniqueness":
             results[key] = {"distinct_count": row[f"uq__{c}"] or 0, "total": total_count}
         elif m == "mean":
-            results[key] = {"mean": row[f"mean__{c}"], "std": row[f"std__{c}"], "total": total_count}
+            results[key] = {"mean": row[f"mean__{c}"] or 0, "std": row[f"std__{c}"] or 0, "total": total_count}
         elif m == "min":
-            results[key] = {"value": row[f"min__{c}"], "total": total_count}
+            results[key] = {"value": row[f"min__{c}"] or 0, "total": total_count}
         elif m == "max":
-            results[key] = {"value": row[f"max__{c}"], "total": total_count}
+            results[key] = {"value": row[f"max__{c}"] or 0, "total": total_count}
         elif m == "stddev":
-            results[key] = {"value": row[f"sdev__{c}"], "total": total_count}
+            results[key] = {"value": row[f"sdev__{c}"] or 0, "total": total_count}
         elif m == "percentile":
-            results[key] = {"value": row[f"pct__{c}"], "total": total_count}
+            results[key] = {"value": row[f"pct__{c}__{i}"] or 0, "total": total_count}
         elif m == "row_count":
             results[key] = {"count": total_count}
 
