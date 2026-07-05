@@ -84,3 +84,16 @@ def test_null_aggregates_are_guarded_to_zero():
     results = compute_metrics(df, expectations)
     assert results["revenue:mean"] == {"mean": 0, "std": 0, "total": 0}
     assert results["revenue:null_rate"] == {"null_count": 0, "total": 0}
+
+
+def test_uniqueness_hll_overestimate_is_clamped_to_total():
+    # approx_count_distinct (HLL) can estimate above the real row count on a
+    # near-unique column; distinct_count must be clamped so p_hat stays <= 1.
+    expectations = [
+        Expectation(column="id", metric="uniqueness", threshold=0.99, direction="above"),
+    ]
+    df = _mock_df({"uq__id": 1050, "cnt": 1000})  # HLL says 1050 distinct in 1000 rows
+
+    results = compute_metrics(df, expectations)
+    assert results["id:uniqueness"]["distinct_count"] == 1000  # clamped to total
+    assert results["id:uniqueness"]["total"] == 1000

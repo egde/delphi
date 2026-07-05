@@ -52,7 +52,10 @@ def compute_metrics(df, expectations: list[Expectation]) -> dict[str, dict]:
         if m == "null_rate":
             results[key] = {"null_count": row[f"nr__{c}"] or 0, "total": total_count}
         elif m == "uniqueness":
-            results[key] = {"distinct_count": row[f"uq__{c}"] or 0, "total": total_count}
+            # Clamp: HLL (approx_count_distinct) can overestimate above the actual
+            # row count on near-unique columns, which would push p_hat > 1 and break
+            # the Wilson interval. Distinct count can never exceed total.
+            results[key] = {"distinct_count": min(row[f"uq__{c}"] or 0, total_count), "total": total_count}
         elif m == "mean":
             results[key] = {"mean": row[f"mean__{c}"] or 0, "std": row[f"std__{c}"] or 0, "total": total_count}
         elif m == "min":
