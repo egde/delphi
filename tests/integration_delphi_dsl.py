@@ -269,3 +269,36 @@ print("PASS: reconciliation full DSL pipeline")
 # MAGIC 14. Reconciliation — full DSL pipeline
 
 print("ALL 14 INTEGRATION TESTS PASSED - v0.5.0")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Performance smoke: multi-metric batch (single fused aggregation)
+# MAGIC A batch of expectations that previously issued N sorted scans should now
+# MAGIC complete via one fraction-sample + one fused aggregation over a cached sample.
+
+# COMMAND ----------
+
+import time
+
+@datatest("delphi.default.prices")
+def perf_batch(dt):
+    dt.expect(col("close").null_rate < 0.01)
+    dt.expect(col("close").mean.between(0, 1_000_000))
+    dt.expect(col("ticker").uniqueness > 0.0)
+    dt.expect(col("close").min > -1)
+    dt.expect(F.row_count() > 1000)
+
+ds_perf = perf_batch()
+perf_config = DelphiConfig(sample_ceiling=10000, enable_history=False)
+
+_start = time.monotonic()
+perf_results = run_expectations(spark, ds_perf.table, ds_perf.expectations, perf_config, test_name="perf_batch")
+_elapsed = time.monotonic() - _start
+
+for r in perf_results:
+    cr = r.confidence_result
+    print(f"  {r.test_name}: {r.status.upper()} observed={cr.observed:.6f} method={cr.method}")
+    assert r.status == "pass", f"{r.test_name} failed: {r.error or cr}"
+print(f"perf_batch wall time: {_elapsed:.2f}s")
+print("PASS: performance smoke - multi-metric batch")
