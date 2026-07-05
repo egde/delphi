@@ -1,7 +1,38 @@
 import pytest
-from delphi.runner import _compute_confidence, _format_threshold, _exp_name
+from unittest.mock import MagicMock, patch
+from delphi.runner import _compute_confidence, _format_threshold, _exp_name, run_expectations
 from delphi.assertions.expectation import Expectation
 from delphi.confidence.result import ConfidenceResult
+from delphi.config import DelphiConfig
+from delphi.engine.sampler import SamplePlan
+from delphi.engine.prescan import PrescanResult
+
+
+def _prescan():
+    return PrescanResult(
+        table="t", row_count=1_000_000, partition_columns=[],
+        clustering_columns=[], columns={},
+    )
+
+
+def test_run_expectations_caches_and_unpersists_sample():
+    exp = Expectation(column="x", metric="null_rate", threshold=0.05, direction="below")
+    sample_df = MagicMock()
+    # enable_history=False so the runner skips file I/O (history branch).
+    config = DelphiConfig(enable_history=False)
+
+    with patch("delphi.runner.prescan_table", return_value=_prescan()), \
+         patch("delphi.runner.detect_time_column", return_value=None), \
+         patch("delphi.runner.compute_sample_size",
+               return_value=SamplePlan(n=1000, fraction=0.001, use_full_table=False)), \
+         patch("delphi.runner.sample_dataframe", return_value=sample_df), \
+         patch("delphi.runner.compute_metrics",
+               return_value={"x:null_rate": {"null_count": 10, "total": 1000}}):
+        results = run_expectations(MagicMock(), "t", [exp], config)
+
+    sample_df.cache.assert_called_once()
+    sample_df.unpersist.assert_called_once()
+    assert results[0].status in ("pass", "fail")
 
 
 def test_compute_confidence_null_rate():
