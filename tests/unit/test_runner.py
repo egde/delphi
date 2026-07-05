@@ -35,6 +35,26 @@ def test_run_expectations_caches_and_unpersists_sample():
     assert results[0].status in ("pass", "fail")
 
 
+def test_run_expectations_unpersists_on_error():
+    exp = Expectation(column="x", metric="null_rate", threshold=0.05, direction="below")
+    sample_df = MagicMock()
+    config = DelphiConfig(enable_history=False)
+
+    with patch("delphi.runner.prescan_table", return_value=_prescan()), \
+         patch("delphi.runner.detect_time_column", return_value=None), \
+         patch("delphi.runner.compute_sample_size",
+               return_value=SamplePlan(n=1000, fraction=0.001, use_full_table=False)), \
+         patch("delphi.runner.sample_dataframe", return_value=sample_df), \
+         patch("delphi.runner.compute_metrics", side_effect=RuntimeError("boom")):
+        results = run_expectations(MagicMock(), "t", [exp], config)
+
+    # metrics raised during setup -> results are error status, but the cached
+    # sample must still be unpersisted via the finally.
+    sample_df.cache.assert_called_once()
+    sample_df.unpersist.assert_called_once()
+    assert results[0].status == "error"
+
+
 def test_compute_confidence_null_rate():
     exp = Expectation(column="x", metric="null_rate", threshold=0.05, direction="below", confidence=0.95)
     metrics = {"null_count": 10, "total": 1000}

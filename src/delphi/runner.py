@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from difflib import get_close_matches
@@ -17,6 +18,8 @@ from delphi.engine.metrics import compute_metrics, compute_comparison_metrics, C
 from delphi.engine.reconciliation import compute_reconciliation_metrics, RECONCILIATION_METRICS
 from delphi.evidence import collect_evidence
 from delphi.detect.time_column import detect_time_column
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -59,6 +62,8 @@ def run_expectations(
                 sample_ceiling=config.sample_ceiling,
             )
             sampled_df = sample_dataframe(spark, table, sample_plan, time_column=time_col)
+            # Cache so the metric pass and evidence-collection pass read the same
+            # physical rows — a lazy sample would otherwise re-randomize between them.
             sampled_df.cache()
 
             # Split expectations into regular, comparison, and reconciliation
@@ -164,8 +169,8 @@ def run_expectations(
         if sampled_df is not None:
             try:
                 sampled_df.unpersist()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to unpersist sampled DataFrame: %s", e)
 
 
 def _compute_confidence(
